@@ -1,8 +1,9 @@
 {
-  "name": "איפה הכסף – בדיקה",
-  "short_name": "בדיקת שיתוף",
+  "name": "איפה הכסף",
+  "short_name": "איפה הכסף",
   "lang": "he",
   "dir": "rtl",
+  "id": "./",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
