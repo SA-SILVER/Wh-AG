@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#FBF4E8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; manifest-src 'self'; worker-src 'self'; object-src 'none'; frame-src 'none'; form-action 'none'; base-uri 'none'">
+<meta name="referrer" content="no-referrer">
+<title>איפה הכסף – בדיקה</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon-192.png">
+<style>
+  body{margin:0;background:#FBF4E8;color:#1B1E3A;font-family:system-ui,sans-serif;font-size:16px;line-height:1.6}
+  main{max-width:480px;margin:0 auto;padding:24px 18px 40px}
+  h1{font-size:24px;text-align:center;margin:8px 0 4px}
+  .sub{text-align:center;color:#8A8698;font-size:14px;margin-bottom:18px}
+  .card{background:#FFFDF9;border-radius:20px;box-shadow:0 6px 24px rgba(80,60,20,.08);padding:16px 18px;margin:12px 0}
+  .row{display:flex;justify-content:space-between;gap:10px;padding:6px 0;border-bottom:1px solid #EFE7DA}
+  .row:last-child{border-bottom:0}
+  .ok{color:#16a34a;font-weight:700} .no{color:#dc2626;font-weight:700} .wait{color:#8A8698}
+  .big{font-size:20px;font-weight:800;text-align:center;margin:4px 0 8px}
+  .note{font-size:13.5px;color:#6b6878}
+  .err{background:#fde8ec}
+  .good{background:#e6f7dd}
+  img{display:block;margin:0 auto;width:72px;height:72px}
+</style>
+</head>
+<body>
+<main>
+  <img src="icon-192.png" alt="">
+  <h1>איפה הכסף – דף בדיקה</h1>
+  <div class="sub">בודק שאפשר לשתף צ'אט מווטסאפ ישר לכאן. אין כאן שום נתון שלך.</div>
+
+  <div class="card">
+    <div class="row"><span>מותקן במסך הבית</span><span id="c-inst" class="wait">…</span></div>
+    <div class="row"><span>עובד גם בלי אינטרנט</span><span id="c-off" class="wait">…</span></div>
+    <div class="row"><span>מצב אינטרנט עכשיו</span><span id="c-net" class="wait">…</span></div>
+  </div>
+
+  <div id="result" class="card"><div class="note">עוד לא שותף לכאן קובץ. בווטסאפ: בקבוצה ← ⋮ ← עוד ← ייצוא צ'אט ← ללא מדיה, ובתפריט השיתוף בוחרים "בדיקת שיתוף".</div></div>
+
+  <p class="note">🔒 הקובץ שמשותף לכאן נקרא רק בתוך הטלפון, ונמחק מיד אחרי הבדיקה. הדף רק סופר הודעות ותאריכים – הוא לא שומר ולא שולח את התוכן לשום מקום.</p>
+  <p class="note" style="text-align:center">גרסת בדיקה 1</p>
+</main>
+<script>
+'use strict';
+const $ = id => document.getElementById(id);
+const set = (id, ok, yes, no) => { const el = $(id); el.className = ok ? 'ok' : 'no'; el.textContent = ok ? yes : no; };
+const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+function checks() {
+  const inst = matchMedia('(display-mode: standalone)').matches || matchMedia('(display-mode: minimal-ui)').matches;
+  set('c-inst', inst, '✓ כן', '✗ עוד לא (נפתח בדפדפן)');
+  set('c-off', !!navigator.serviceWorker && !!navigator.serviceWorker.controller, '✓ כן', '✗ עוד לא');
+  set('c-net', navigator.onLine, 'מחובר', 'בלי אינטרנט');
+}
+addEventListener('online', checks); addEventListener('offline', checks);
+
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('sw.js').then(() => navigator.serviceWorker.ready).then(checks).catch(checks);
+  navigator.serviceWorker.addEventListener('controllerchange', checks);
+}
+checks();
+
+/* ---- read a WhatsApp export (txt or zip) inside the phone ---- */
+async function inflateRaw(bytes) {
+  const ds = new DecompressionStream('deflate-raw');
+  const out = new Response(new Blob([bytes]).stream().pipeThrough(ds));
+  return new Uint8Array(await out.arrayBuffer());
+}
+async function txtFromZip(u8) {
+  const dv = new DataView(u8.buffer, u8.byteOffset, u8.byteLength);
+  let eocd = -1;
+  for (let i = u8.length - 22; i >= Math.max(0, u8.length - 66000); i--) if (dv.getUint32(i, true) === 0x06054b50) { eocd = i; break; }
+  if (eocd < 0) throw new Error('קובץ zip פגום');
+  const count = dv.getUint16(eocd + 10, true);
+  let p = dv.getUint32(eocd + 16, true), best = null;
+  for (let n = 0; n < count; n++) {
+    if (dv.getUint32(p, true) !== 0x02014b50) break;
+    const method = dv.getUint16(p + 10, true), csize = dv.getUint32(p + 20, true), usize = dv.getUint32(p + 24, true);
+    const nl = dv.getUint16(p + 28, true), el = dv.getUint16(p + 30, true), cl = dv.getUint16(p + 32, true), lho = dv.getUint32(p + 42, true);
+    const name = new TextDecoder().decode(u8.subarray(p + 46, p + 46 + nl));
+    if (/\.txt$/i.test(name) && (!best || usize > best.usize)) best = {name, method, csize, usize, lho};
+    p += 46 + nl + el + cl;
+  }
+  if (!best) throw new Error('בקובץ ה-zip לא נמצא קובץ txt');
+  const start = best.lho + 30 + dv.getUint16(best.lho + 26, true) + dv.getUint16(best.lho + 28, true);
+  const data = u8.subarray(start, start + best.csize);
+  const raw = best.method === 0 ? data : best.method === 8 ? await inflateRaw(data) : null;
+  if (!raw) throw new Error('סוג דחיסה לא מוכר');
+  return new TextDecoder('utf-8').decode(raw);
+}
+const HEAD = /^\[?(\d{1,2})[./-](\d{1,2})[./-](\d{2,4}),?\s+(\d{1,2}):(\d{2})/;
+function summarize(text) {
+  const heads = [];
+  for (const raw of text.split(/\r?\n/)) {
+    const t = raw.replace(/[‎‏‪-‮⁦-⁩﻿]/g, '').trim();
+    const h = t.match(HEAD); if (h) heads.push(h);
+  }
+  if (!heads.length) return null;
+  const md = heads.some(h => +h[2] > 12) && !heads.some(h => +h[1] > 12);
+  const d = h => { let y = +h[3]; if (y < 100) y += 2000; const day = md ? +h[2] : +h[1], mo = md ? +h[1] : +h[2]; return `${String(day).padStart(2, '0')}.${String(mo).padStart(2, '0')}.${y}`; };
+  return {count: heads.length, first: d(heads[0]), last: d(heads[heads.length - 1])};
+}
+
+async function showShared() {
+  if (!new URLSearchParams(location.search).has('shared')) return;
+  history.replaceState(null, '', './');
+  const box = $('result');
+  let c;
+  try { c = await caches.open('shared'); } catch { box.className = 'card err'; box.innerHTML = '<div class="big">✗ לא הצלחתי לקרוא את השיתוף</div>'; return; }
+  const infoR = await c.match('./shared-info'), fileR = await c.match('./shared-file');
+  await c.delete('./shared-info'); await c.delete('./shared-file');
+  const info = infoR ? await infoR.json() : null;
+  if (!info) { box.className = 'card err'; box.innerHTML = '<div class="big">✗ השיתוף לא הגיע</div>'; return; }
+  const f = info.files[0];
+  if (!f || !fileR) {
+    box.className = 'card err';
+    box.innerHTML = `<div class="big">✗ הגיע שיתוף, אבל בלי קובץ</div><div class="note">שדות שהגיעו: ${esc(info.fields.join(', ') || '—')}</div>`;
+    return;
+  }
+  const u8 = new Uint8Array(await fileR.arrayBuffer());
+  let text, kind;
+  try {
+    if (u8[0] === 0x50 && u8[1] === 0x4b) { kind = 'zip'; text = await txtFromZip(u8); }
+    else { kind = 'txt'; text = new TextDecoder('utf-8').decode(u8); }
+  } catch (e) {
+    box.className = 'card err';
+    box.innerHTML = `<div class="big">✗ הקובץ הגיע, אבל לא הצלחתי לפתוח אותו</div><div class="note">${esc(e.message)} · ${esc(f.name)} · ${esc(f.type || 'בלי סוג')}</div>`;
+    return;
+  }
+  const s = summarize(text);
+  text = null;
+  box.className = 'card ' + (s ? 'good' : 'err');
+  box.innerHTML = `<div class="big">${s ? '✓ הבדיקה הצליחה!' : '✗ הקובץ הגיע, אבל לא נמצאו בו הודעות'}</div>
+    <div class="row"><span>שם הקובץ</span><span>${esc(f.name)}</span></div>
+    <div class="row"><span>סוג</span><span>${kind} · ${esc(f.type || 'בלי סוג')}</span></div>
+    <div class="row"><span>גודל</span><span>${(f.size / 1024).toFixed(1)} KB</span></div>
+    ${s ? `<div class="row"><span>הודעות שזוהו</span><span>${s.count}</span></div>
+    <div class="row"><span>ההודעה הראשונה</span><span>${s.first}</span></div>
+    <div class="row"><span>ההודעה האחרונה</span><span>${s.last}</span></div>` : ''}
+    <div class="note" style="margin-top:8px">הקובץ כבר נמחק מהדף.</div>`;
+}
+showShared();
+</script>
+</body>
+</html>
