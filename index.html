@@ -1283,6 +1283,25 @@ $('#f-restore').addEventListener('change', async ev => { const f = ev.target.fil
 document.addEventListener('input', ev => { if (ev.target.id === 'dq') { S.f.q = ev.target.value; const pos = ev.target.selectionStart; render(); const i = $('#dq'); if (i) { i.focus(); i.setSelectionRange(pos, pos); } } });
 document.addEventListener('change', ev => { const k = ev.target.dataset && ev.target.dataset.fsel; if (k) { S.f[k] = ev.target.value; render(); } });
 document.addEventListener('keydown', ev => { if (ev.key === 'Escape' && stack.length) closeSheet(); });
+// Swipe between months (RTL): swipe right = previous month, swipe left = next month.
+let swipe = null;
+document.addEventListener('touchstart', ev => {
+  swipe = null;
+  if (!D || stack.length || S.view === 'review' || ev.touches.length !== 1) return;
+  if (ev.target.closest('input, textarea, select, .chips, nav')) return;
+  const t = ev.touches[0]; swipe = {x: t.clientX, y: t.clientY, at: Date.now()};
+}, {passive: true});
+document.addEventListener('touchend', ev => {
+  if (!swipe) return;
+  const t = ev.changedTouches[0], dx = t.clientX - swipe.x, dy = t.clientY - swipe.y, dt = Date.now() - swipe.at;
+  swipe = null;
+  if (Math.abs(dx) < 70 || Math.abs(dx) < Math.abs(dy) * 1.8 || dt > 700) return;
+  const k = dx > 0 ? -1 : 1, m = addM(S.month, k);
+  if (m < minMonth() || m > addM(curMonth(), 1)) return toast(k < 0 ? 'אין חודשים קודמים' : 'אין חודשים נוספים', 1400);
+  S.month = m; render();
+  const app = $('#app'); app.style.transition = 'none'; app.style.opacity = '.4'; app.style.transform = `translateX(${k < 0 ? 24 : -24}px)`;
+  requestAnimationFrame(() => { app.style.transition = 'opacity .18s, transform .18s'; app.style.opacity = ''; app.style.transform = ''; });
+}, {passive: true});
 // Back button: closes an open window, then returns to the home screen; leaving needs two presses in a row.
 let guardActive = false;          // a history entry pushed during a tap (browsers honour those)
 function pushGuard() { try { history.pushState({kesef: 1}, ''); } catch {} }
@@ -1297,7 +1316,7 @@ window.addEventListener('popstate', () => {
   setTimeout(() => { if (!guardActive) pushGuard(); }, 2200);
 });
 /* =============== installed app: share target + updates =============== */
-const APP_VERSION = '1.0';
+const APP_VERSION = '1.1';
 async function importPendingShare() {
   let c; try { c = await caches.open('shared'); } catch { return; }
   const fr = await c.match('./shared-file'), ir = await c.match('./shared-info');
