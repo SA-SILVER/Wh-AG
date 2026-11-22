@@ -422,9 +422,20 @@ function dupPairs() {
     const words = t => new Set(String(t.desc).replace(/[()"',.\-]/g, ' ').split(/\s+/).filter(w => w.length >= 3 && !/^(העברה|בביט|ביט|פייבוקס|בפייבוקס|מזומן|דרך|עבור)$/.test(w)));
     const wa = words(a), shared = [...words(b)].some(w => wa.has(w));
     if (a.desc === b.desc || (a.person !== b.person && shared)) out.push([a, b]); } }
+  return [...out, ...fixedDupPairs()];
+}
+// a fixed charge from the workbook that was also written in the group in the same month
+function fixedDupPairs() {
+  const out = [], fx = {};
+  for (const it of D.chat) {
+    const t = chatTx(it); if (!t || t.pending || t.incoming || isClosed(t.month) || t.date < D.cfg.start || (D.ov[t.id] || {}).notDup) continue;
+    const list = fx[t.month] = fx[t.month] || fixedFor(t.month).filter(f => (D.fixed.find(x => x.id === f.fid) || {}).xkey);
+    const f = list.find(f => Math.abs(f.amount - t.amount) <= Math.max(1, f.amount * 0.02) && (fxShare(f.desc, t.desc) || (f.cat === t.cat && Math.abs(f.amount - t.amount) < 0.01)));
+    if (f) out.push([{...f, person: 'קבועה מהאקסל', text: f.desc}, t]);
+  }
   return out;
 }
-function openFixed(m) { return fixedFor(m).filter(f => !f.ok); }
+function openFixed(m) { return fixedFor(m).filter(f => !f.ok && !(D.fixed.find(x => x.id === f.fid) || {}).xkey); }
 function openRefunds() { return D.chat.map(it => chatTx(it)).filter(t => t && t.refundExp && !t.refundDone); }
 function openIncome(m) { const l = monthTx(m); return l.filter(t => t.src === 'income' && !t.ok); }
 function dueFixed() { const out = []; for (const m of reviewMonths()) out.push(...openFixed(m).filter(f => f.date <= todayStr()), ...openIncome(m)); return out; }
@@ -433,7 +444,7 @@ function entryByKey(k) {
   if (k.startsWith('inc:')) return monthTx(m).find(t => t.key === k) || (() => { const c = catById(k.slice(4).split('|')[0]); return {key: k, amount: num(c && c.budget), cat: c && c.id}; })();
   const fid = k.split('|')[0]; return fixedFor(m).find(x => x.fid === fid);
 }
-function reviewCount() { return pendingChat().length + dueFixed().length + dupPairs().length; }
+function reviewCount() { return pendingChat().length + dueFixed().length + dupPairs().length + ((D.meta.fxAsk || []).length) + ((D.meta.fxChanges || []).length ? 1 : 0); }
 
 const SKIP = '__skip';
 const kwCatName = c => c === SKIP ? 'לא לייבא' : (catById(c) ? catById(c).name : '?');
@@ -759,7 +770,13 @@ function viewReview() {
       <div class="chips">${quickCats(t).map(c => `<button data-act="rv-cat" data-id="${esc(t.id)}" data-c="${c.id}">${esc(c.name)}</button>`).join('')}
         <button data-act="rv-more" data-id="${esc(t.id)}" style="color:var(--blue);font-weight:600">סעיף אחר…</button>
         <button data-act="rv-skip" data-id="${esc(t.id)}" style="color:var(--muted)">לא לייבא</button></div></div>`;
+  const fa = D.meta.fxAsk || [], fc = D.meta.fxChanges || [];
   return `<h1 class="hero">מה <span class="script blue">לבדוק</span>?</h1>
+    ${fa.length ? `<div class="label">זה אותו חיוב? (${fa.length})</div>${fa.map(a => { const f = D.fixed.find(x => x.id === a.fid) || {}; return `<div class="card rv">
+        <div class="t">מהאקסל: <b>${esc(a.name)}</b> – ${ils(a.amount)} (${esc(FX_TYPE[a.type] || a.type)})<br>תנועה קבועה שהגדרת: <b>${esc(f.name || '')}</b> – ${ils(num(f.amount))}</div>
+        <div class="chips"><button data-act="fxa-yes" data-k="${esc(a.key)}">כן, אותו חיוב – לחבר</button><button data-act="fxa-no" data-k="${esc(a.key)}" style="color:var(--muted)">לא, חיוב אחר</button></div></div>`; }).join('')}` : ''}
+    ${fc.length ? `<div class="label">מה השתנה בחיובים הקבועים</div><div class="card">${fc.map(x => `<div class="note" style="margin:4px 0">${fxChangeLine(x)}</div>`).join('')}
+        <div class="chips" style="margin-top:6px"><button data-act="fxc-seen">ראיתי</button><button data-act="fixed" style="color:var(--blue)">לרשימת הקבועות</button></div></div>` : ''}
     ${dp.length ? `<div class="label">אולי נרשם פעמיים? (${dp.length})</div>${dp.map(([a, b]) => `<div class="card rv"><div class="meta"><span>${dShort(a.date)}</span><span class="amt">${ils(Math.abs(a.amount))}</span></div>
         <div class="t">• ${esc(a.person)}: ${esc(a.text)}<br>• ${esc(b.person)}: ${esc(b.text)}</div>
         <div class="chips"><button data-act="dup-skip" data-id="${esc(b.id)}">זה כפול – לספור פעם אחת</button><button data-act="dup-ok" data-a="${esc(a.id)}" data-b="${esc(b.id)}" style="color:var(--muted)">שתי הוצאות שונות</button></div></div>`).join('')}` : ''}
@@ -769,7 +786,7 @@ function viewReview() {
     ${rf.length ? `<div class="label">מחכות להחזר (${rf.length})</div><div class="card">${rf.map(t => `<div class="txline" style="align-items:center"><div><div class="a">${ils(t.refundAmt || t.amount)}</div><div class="d">${esc(t.text)} · ${dShort(t.date)}</div></div>
         <button class="smallbtn" data-act="rf-done" data-id="${esc(t.id)}">התקבל ✓</button></div>`).join('')}</div>
         <p class="note" style="margin:6px">כשהחזר נכנס, כותבים אותו בקבוצה ("התקבל החזר 200 ..."), והוא יירשם כסכום שלילי בסעיף שתבחרו. כאן רק מסמנים שהעניין סגור.</p>` : ''}
-    ${!pc.length && !of.length && !rf.length && !dp.length ? `<div class="empty">${I.flower}<h2>הכל <span class="script">מסודר</span></h2><p class="note">אין כרגע מה לבדוק.</p></div>` : ''}`;
+    ${!pc.length && !of.length && !rf.length && !dp.length && !fa.length && !fc.length ? `<div class="empty">${I.flower}<h2>הכל <span class="script">מסודר</span></h2><p class="note">אין כרגע מה לבדוק.</p></div>` : ''}`;
 }
 function quickCats(t) {
   if (t.incoming && !isRefundText(t.text)) return cats().filter(c => isIncome(c) && !c.archived);
@@ -993,8 +1010,8 @@ function manualSheet(orig, presetCat) {
 /* ---- fixed items ---- */
 function fixedList() {
   openSheet(() => `${head('תנועות קבועות')}
-    <p class="note">מה שיורד מהבנק או נכנס אליו בלי שנכתב בקבוצה: משכנתא, הוראות קבע, ביטוחים, משכורות. כל חודש הן מופיעות לבד כ"צפוי", ואפשר לאשר שירדו או לתקן סכום.</p>
-    <div class="card" style="padding:4px 12px">${D.fixed.length ? D.fixed.map(f => `<button class="txline" data-act="fx-edit" data-id="${esc(f.id)}"><div><div class="a">${ils(f.amount)}</div><div class="d">${esc(f.name)} · ${esc(catById(f.cat)?.name || '?')}</div></div>
+    <p class="note">מה שיורד מהבנק או נכנס אליו בלי שנכתב בקבוצה: משכנתא, הוראות קבע, ביטוחים, משכורות. כל חודש הן מופיעות לבד כ"צפוי", ואפשר לאשר שירדו או לתקן סכום. מה שמסומן "מהאקסל" מתעדכן לבד בכל טעינת קובץ מהאקסל, לפי החודש האחרון באשראי ובעו"ש.</p>
+    <div class="card" style="padding:4px 12px">${D.fixed.length ? D.fixed.map(f => `<button class="txline" data-act="fx-edit" data-id="${esc(f.id)}"><div><div class="a">${ils(f.amount)}</div><div class="d">${esc(f.name)} · ${esc(catById(f.cat)?.name || '?')}${f.xkey ? ` · <span style="color:var(--blue)">מהאקסל${f.xtype ? ' – ' + esc(FX_TYPE[f.xtype] || f.xtype) : ''}</span>` : ''}</div></div>
       <div class="r">${f.freq === '2m' ? 'כל חודשיים' : f.freq === 'list' ? 'חודשים: ' + (f.months || []).join(',') : 'כל חודש'}<br>${f.day ? 'ב-' + f.day + ' לחודש' : ''}${f.to ? '<br>עד ' + sheetName(f.to) : ''}</div></button>`).join('') : '<p class="note">אין עדיין</p>'}</div>
     <button class="primary" data-act="fx-edit" data-id="">+ תנועה קבועה</button>`, {live: true});
 }
@@ -1026,7 +1043,7 @@ function fixedEdit(id) {
           if (f0) Object.assign(f0, st); else D.fixed.push(st);
           save(); closeSheet(e); render(); refreshSheets(); toast('נשמר');
         }
-        if (b.id === 'x-del') { if (!b.dataset.sure) { b.dataset.sure = 1; b.textContent = 'בטוח? לחיצה נוספת מוחקת'; return; } D.fixed = D.fixed.filter(x => x.id !== id); save(); closeSheet(e); render(); refreshSheets(); }
+        if (b.id === 'x-del') { if (!b.dataset.sure) { b.dataset.sure = 1; b.textContent = 'בטוח? לחיצה נוספת מוחקת'; return; } if (f0 && f0.xkey) D.meta.fxDel = [...(D.meta.fxDel || []), f0.xkey]; D.fixed = D.fixed.filter(x => x.id !== id); save(); closeSheet(e); render(); refreshSheets(); }
       });
     }
   });
@@ -1135,6 +1152,87 @@ function syncSheet() {
       <button class="ghost" data-act="xlimport">טעינת קובץ מהאקסל</button></div>
     <p class="note">🔒 מעבירים את הקבצים בין הטלפון למחשב בכבל USB או ב-Quick Share – לא דרך ווטסאפ, מייל או דרייב.</p>`);
 }
+/* ---- fixed charges from the workbook (standing orders, subscriptions, bank debits, fees) ---- */
+const FX_TYPE = {'הוראת קבע': 'הוראת קבע באשראי', 'מנוי': 'מנוי שחוזר כל חודש', 'עו"ש': 'הו"ק בעו"ש', 'עמלה': 'עמלה / דמי כרטיס'};
+const fxWords = t => new Set(String(t || '').replace(/[()"'״׳,.\-*/]/g, ' ').split(/\s+/).filter(w => w.length >= 3 && !/^(בע"מ|בעמ|חברת|הוראת|קבע)$/.test(w)));
+const fxShare = (a, b) => { const wa = fxWords(a); return [...fxWords(b)].some(w => wa.has(w)); };
+function fxLooksSame(x, name, amount, cat) {
+  if (x.to && x.to < curMonth()) return false;
+  const a = num(x.amount); if (!(a > 0) || Math.abs(a - amount) > Math.max(a, amount) * 0.15) return false;
+  return (cat && x.cat === cat) || fxShare(x.name, name);
+}
+// a new amount was seen in month m: the months before it keep the amount that was expected then
+function fxFreeze(f, m) {
+  const old = num(f.amount);
+  for (let x = f.from || m; x < m; x = addM(x, 1)) {
+    if (!fixedActive(f, x)) continue;
+    const k = f.id + '|' + x; if ((D.fixedM[k] || {}).amount == null) D.fixedM[k] = {...(D.fixedM[k] || {}), amount: old};
+  }
+}
+function fxNew(a) {
+  return {id: 'f' + uid(), xkey: a.key, name: a.name, cat: a.cat, amount: a.amount, day: a.day, freq: 'm', months: [], from: addM(a.last, 1), to: '',
+    pay: a.src === 'bank' ? 'עו"ש (הו"ק / העברות)' : '', xtype: a.type, xlast: a.last};
+}
+function syncFixed(rowsFx) {
+  if (!rowsFx) return null;                                   // a workbook from before this feature: change nothing
+  const M = D.meta; M.fxNo = M.fxNo || []; M.fxDel = M.fxDel || [];
+  const ch = [], ask = [], seen = new Set();
+  for (const [key0, name0, amt0, day0, cat0, type0, last0, src0] of rowsFx) {
+    const key = String(key0).trim(), last = sheetToMonth(last0), amount = Math.round(num(amt0) * 100) / 100;
+    if (!key || !last || !(amount > 0)) continue;
+    seen.add(key);
+    if (M.fxDel.includes(key)) continue;                        // deleted by hand: not brought back
+    const name = String(name0).trim(), type = String(type0).trim(), src = String(src0).trim();
+    const c = catByName(String(cat0).trim()), cat = c && !c.archived ? c.id : (suggestCat(name, false) || '');
+    const a = {key, name, amount, day: Math.min(31, Math.max(1, Math.round(num(day0)) || 1)), cat: cat === SKIP ? '' : cat, type, last, src};
+    const f = D.fixed.find(x => x.xkey === key);
+    if (f) {
+      if (f.to && f.to < addM(last, 1)) { f.to = ''; ch.push({t: 'back', name: f.name, amount}); }
+      if (Math.abs(num(f.amount) - amount) > 0.005) { ch.push({t: 'up', name: f.name, old: num(f.amount), amount, month: last}); fxFreeze(f, last); f.amount = amount; }
+      f.day = a.day; f.xtype = type; f.xlast = last;
+      if (!catById(f.cat) && a.cat) f.cat = a.cat;
+      if (fixedActive(f, last)) D.fixedM[f.id + '|' + last] = {...(D.fixedM[f.id + '|' + last] || {}), ok: true, amount};   // charged in that month: confirmed
+      continue;
+    }
+    const was = (M.fxAsk || []).find(x => x.key === key);
+    const cand = was ? D.fixed.find(x => x.id === was.fid && !x.xkey) : D.fixed.find(x => !x.xkey && !M.fxNo.includes(key + '|' + x.id) && fxLooksSame(x, name, amount, a.cat));
+    if (cand) { ask.push({...a, fid: cand.id}); continue; }
+    D.fixed.push(fxNew(a));
+    ch.push({t: type === 'עמלה' ? 'fee' : 'new', name, amount, type});
+  }
+  // charges that stopped: no longer expected after the last month they were seen
+  if (rowsFx.length) for (const f of D.fixed) if (f.xkey && !seen.has(f.xkey) && !f.to) { f.to = f.xlast || addM(curMonth(), -1); ch.push({t: 'gone', name: f.name, amount: num(f.amount)}); }
+  M.fxAsk = ask;
+  if (ch.length) M.fxChanges = [...(M.fxChanges || []), ...ch];
+  return {ch, ask};
+}
+function fxChangeLine(x) {
+  const n = `<b>${esc(x.name)}</b>`;
+  const noCat = () => { const f = D.fixed.find(f => f.name === x.name && f.xkey); return f && !catById(f.cat) ? ' – <span class="red">צריך לבחור סעיף</span>' : ''; };
+  if (x.t === 'new') return `חדש: ${n} – ${ils(x.amount)} (${esc(FX_TYPE[x.type] || x.type)})${noCat()}`;
+  if (x.t === 'fee') return `עמלה / דמי כרטיס: ${n} – ${ils(x.amount)}${noCat()}`;
+  if (x.t === 'up') return `${n}: ${ils(x.old)} ← ${ils(x.amount)} <span class="${x.amount > x.old ? 'red' : 'green'}">(${x.amount > x.old ? 'עלה' : 'ירד'} ב-${ils(Math.abs(x.amount - x.old))})</span>`;
+  if (x.t === 'gone') return `${n}: לא חויב בחודש האחרון – הוסר מהצפי`;
+  if (x.t === 'back') return `${n}: חזר לחייב – ${ils(x.amount)}`;
+  return n;
+}
+function fxAnswer(key, same) {
+  const M = D.meta, a = (M.fxAsk || []).find(x => x.key === key); if (!a) return;
+  M.fxAsk = M.fxAsk.filter(x => x !== a);
+  const f = D.fixed.find(x => x.id === a.fid);
+  if (same && f) {
+    if (Math.abs(num(f.amount) - a.amount) > 0.005) { M.fxChanges = [...(M.fxChanges || []), {t: 'up', name: f.name, old: num(f.amount), amount: a.amount, month: a.last}]; fxFreeze(f, a.last); }
+    Object.assign(f, {xkey: a.key, amount: a.amount, day: a.day, xtype: a.type, xlast: a.last});
+    if (!catById(f.cat) && a.cat) f.cat = a.cat;
+    toast('חובר – מעכשיו הסכום מתעדכן מהאקסל');
+  } else {
+    M.fxNo = [...(M.fxNo || []), a.key + '|' + a.fid];
+    D.fixed.push(fxNew(a));
+    M.fxChanges = [...(M.fxChanges || []), {t: a.type === 'עמלה' ? 'fee' : 'new', name: a.name, amount: a.amount, type: a.type}];
+    toast('נוסף כחיוב קבוע נפרד');
+  }
+  save(); render(); refreshSheets();
+}
 const sheetToMonth = n => { const m = String(n).trim().match(/^(\d{1,2})\.(\d{2})$/); return m ? `20${m[2]}-${pad(+m[1])}` : null; };
 async function importExcel(file) {
   if (!file) return;
@@ -1169,6 +1267,7 @@ async function importExcel(file) {
   const closed = {};
   for (const [sn, cname, amt] of cm) { const m = sheetToMonth(sn); if (!m) continue; closed[m] = closed[m] || {}; const c = catByName(String(cname).trim()); if (c && num(amt)) closed[m][c.id] = (closed[m][c.id] || 0) + num(amt); }
   D.closed = closed;
+  const fx = syncFixed(rows('חיובים קבועים'));
   D.meta.excelSync = Date.now();
   recategorize(); save(); stack.slice().forEach(e => closeSheet(e)); render();
   const cms = Object.keys(closed).sort();
@@ -1176,6 +1275,7 @@ async function importExcel(file) {
     <div class="stat"><div><b>${newCats.length}</b><span>סעיפים${added ? ` (${added} חדשים)` : ''}</span></div><div><b>${kx.length}</b><span>מילות מפתח</span></div><div><b>${cms.length}</b><span>חודשים סגורים</span></div></div>
     ${cms.length ? `<p class="note">החודשים ${cms.map(sheetName).join(', ')} מוצגים עכשיו לפי האקסל – מדויק ✓, ולא יופיעו יותר במסך "לבדיקה".</p>` : ''}
     ${hidden.filter(c => !c.archivedBefore).length ? `<p class="note">סעיפים שלא קיימים באקסל הוסתרו: ${hidden.map(c => esc(c.name)).join(', ')}</p>` : ''}
+    ${fx && (fx.ch.length || fx.ask.length) ? `<div class="label">חיובים קבועים מהאשראי והעו"ש</div><div class="card">${fx.ch.map(x => `<div class="note" style="margin:4px 0">${fxChangeLine(x)}</div>`).join('')}${fx.ask.length ? `<div class="note" style="margin:6px 0">${fx.ask.length === 1 ? 'חיוב אחד דומה' : fx.ask.length + ' חיובים דומים'} לתנועה קבועה שהגדרת – השאלה מחכה במסך "לבדיקה".</div>` : ''}</div>` : fx ? '<p class="note">חיובים קבועים: אין שינוי מהפעם הקודמת.</p>' : ''}
     <button class="primary" data-act="close">מעולה</button>`);
 }
 function guideSheet() {
@@ -1362,7 +1462,10 @@ const ACT = {
   'rv-cat': el => setChatCat(el.dataset.id, el.dataset.c),
   'rv-more': el => pickCat('לאיזה סעיף?', null, '', c => setChatCat(el.dataset.id, c)),
   'dup-skip': el => { setOv(el.dataset.id, {skip: true}); toast('נספר פעם אחת'); },
-  'dup-ok': el => { D.ov[el.dataset.a] = {...(D.ov[el.dataset.a] || {}), notDup: true}; D.ov[el.dataset.b] = {...(D.ov[el.dataset.b] || {}), notDup: true}; save(); render(); },
+  'dup-ok': el => { for (const id of [el.dataset.a, el.dataset.b]) if (D.chat.some(x => x.id === id)) D.ov[id] = {...(D.ov[id] || {}), notDup: true}; save(); render(); },
+  'fxa-yes': el => fxAnswer(el.dataset.k, true),
+  'fxa-no': el => fxAnswer(el.dataset.k, false),
+  'fxc-seen': () => { D.meta.fxChanges = []; save(); render(); },
   'rv-skip': el => { const it = D.chat.find(x => x.id === el.dataset.id); setOv(el.dataset.id, {skip: true}); if (it) learnSkipSheet(it); else toast('השורה לא תיספר'); },
   'm-edit': el => { const x = D.manual.find(m => m.id === el.dataset.id); closeSheet(); manualSheet(x); },
   'm-del': el => { if (!el.dataset.sure) { el.dataset.sure = 1; el.innerHTML = 'בטוח? לחיצה נוספת מוחקת <span>🗑</span>'; return; } D.manual = D.manual.filter(m => m.id !== el.dataset.id); save(); closeSheet(); render(); refreshSheets(); },
@@ -1432,7 +1535,7 @@ window.addEventListener('popstate', () => {
   setTimeout(() => { if (!guardActive) pushGuard(); }, 2200);
 });
 /* =============== installed app: share target + updates =============== */
-const APP_VERSION = '1.8';
+const APP_VERSION = '1.9';
 async function importPendingShare() {
   let c; try { c = await caches.open('shared'); } catch { return; }
   const fr = await c.match('./shared-file'), ir = await c.match('./shared-info');
