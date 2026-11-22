@@ -893,9 +893,12 @@ function groupSheet(gid) {
     const gc = cats().filter(c => c.group === gid && md.byCat[c.id]).sort((a, b) => md.byCat[b.id] - md.byCat[a.id]);
     const tot = gc.reduce((s, c) => s + md.byCat[c.id], 0), mx = Math.max(1, ...gc.map(c => Math.abs(md.byCat[c.id])));
     const cnt = id => md.list.filter(t => t.cat === id && !t.pending).length;
+    const all = dash(S.month).total, pc = (v, t) => t ? Math.round(v / t * 100) : 0;
+    // first the share of all the month's expenses (same number base as the home screen), then the share of this group
+    const pcts = c => isIncome(c) ? `${pc(md.byCat[c.id], tot)}% מ${esc(g.name)}` : `${pc(md.byCat[c.id], all)}% מכל ההוצאות · ${pc(md.byCat[c.id], tot)}% מ${esc(g.name)}`;
     return `${head(esc(g.name))}<div class="card fl-row"><span class="chip">${mLabel(S.month)}</span><span class="num">${ils(tot)}</span></div>
       <div class="card" style="margin-top:10px;padding:6px 14px">${gc.map(c => `<button class="catrow" data-act="cat" data-id="${esc(c.id)}"><div class="t"><b>${esc(c.name)}</b><b>${ils(md.byCat[c.id])}</b></div>
-        <div class="bar ${isIncome(c) ? 'g' : ''}"><i style="width:${Math.abs(md.byCat[c.id]) / mx * 100}%"></i></div><div class="foot"><span>${cnt(c.id)} תנועות</span><span>${tot ? Math.round(md.byCat[c.id] / tot * 100) : 0}%</span></div></button>`).join('') || '<p class="note">אין תנועות</p>'}</div>`;
+        <div class="bar ${isIncome(c) ? 'g' : ''}"><i style="width:${Math.abs(md.byCat[c.id]) / mx * 100}%"></i></div><div class="foot"><span>${cnt(c.id)} תנועות</span><span>${pcts(c)}</span></div></button>`).join('') || '<p class="note">אין תנועות</p>'}</div>`;
   }, {live: true});
 }
 function catEditSheet(id) {
@@ -1429,7 +1432,7 @@ window.addEventListener('popstate', () => {
   setTimeout(() => { if (!guardActive) pushGuard(); }, 2200);
 });
 /* =============== installed app: share target + updates =============== */
-const APP_VERSION = '1.6';
+const APP_VERSION = '1.7';
 async function importPendingShare() {
   let c; try { c = await caches.open('shared'); } catch { return; }
   const fr = await c.match('./shared-file'), ir = await c.match('./shared-info');
