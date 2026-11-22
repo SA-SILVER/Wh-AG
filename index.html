@@ -307,7 +307,7 @@ function groupStyle(g) {
 
 /* =============== storage =============== */
 let D = null;
-function blank() { const d = clone(DEFAULTS); if (!d.cfg.start) d.cfg.start = addM(curMonth(), -1) + '-01'; return {v: 3, cfg: d.cfg, kw: d.kw, chat: [], ov: {}, fixed: [], fixedM: {}, manual: [], meta: {dirty: false}}; }
+function blank() { const d = clone(DEFAULTS); if (!d.cfg.start) d.cfg.start = addM(curMonth(), -1) + '-01'; return {v: 4, cfg: d.cfg, kw: d.kw, chat: [], ov: {}, fixed: [], fixedM: {}, manual: [], meta: {dirty: false}}; }
 function loadD() { try { const s = localStorage.getItem(KEY); return s ? JSON.parse(s) : null; } catch { return null; } }
 function save(dirty = true) {
   if (dirty) D.meta.dirty = true;
@@ -323,6 +323,15 @@ function migrate3() {
   const g = D.cfg.groups.find(x => x.name === 'הכנסות');
   if (g) for (const c of D.cfg.cats) if (c.group === g.id) c.kind = 'income';
   D.v = 3; save(false);
+}
+function migrate4() {
+  if (!D || (D.v || 1) >= 4) return;
+  for (const it of D.chat || []) {
+    if (it.incoming || REFUND_EXP.test(it.text || '') || !CREDIT_W.test(it.text || '')) continue;
+    it.incoming = true; it.refundExp = false; it.refundAmt = 0;
+    it.cat = suggestCat(refundCore(it.desc), false) || ''; it.autoSkip = it.cat === SKIP; if (it.autoSkip) it.cat = '';
+  }
+  D.v = 4; save(false);
 }
 try { navigator.storage && navigator.storage.persist && navigator.storage.persist(); } catch {}
 
@@ -436,6 +445,11 @@ function suggestCat(desc, wantIncome) {
 }
 
 /* =============== WhatsApp parser (same rules as the workbook import) =============== */
+// a credit word anywhere in the message ("זיכוי מאושר עד 120", "שופרסל זיכוי 45", "הוחזרו 60") = money came back, not an expense
+const CREDIT_W = /(?<![\u0590-\u05FF])[וה]?(זיכוי|זיכויים|זיכו|הוחזר|הוחזרה|הוחזרו)(?![\u0590-\u05FF])/;
+const REFUND_EXP = /(יתקבל|להתקבל|צפוי)\s*(ה)?(החזר|זיכוי)|החזר\s*(דרך\s*)?קופה קטנה|קופה קטנה/;
+const isRefundText = t => /החזר/.test(t) || CREDIT_W.test(t);
+const refundCore = d => String(d || '').replace(/^החזר\s*/, '').replace(new RegExp(CREDIT_W.source, 'g'), ' ').replace(/ {2,}/g, ' ').trim();
 const BIDI = /[‎‏‪-‮⁦-⁩﻿]/g;
 const SPACES = /[     \t]/g;
 const HEAD = /^\[?(\d{1,2})[./-](\d{1,2})[./-](\d{2,4}),?\s+(\d{1,2}):(\d{2})(?::\d{2})?\s*([AaPp]\.?[Mm]\.?|לפנה"צ|אחה"צ|לפנה״צ|אחה״צ)?\]?\s*(?:-\s*)?(.*)$/;
@@ -526,14 +540,15 @@ function parseChat(text) {
     for (const ph of ['כרטיס']) desc = desc.split(ph).join('');
     for (const ph of [' שח ', ' ש"ח ', ' ש״ח ', ' ₪ ', '₪']) desc = desc.split(ph).join(' ');
     desc = desc.replace(/ {2,}/g, ' ').replace(/^[\s\-–,.:]+|[\s\-–,]+$/g, '').trim();
-    const incoming = msg.startsWith('התקבל') || desc.startsWith('החזר');
+    const expRe = REFUND_EXP.test(msg);
+    const incoming = msg.startsWith('התקבל') || desc.startsWith('החזר') || (!expRe && CREDIT_W.test(msg));
     let cat = '';
     if (incoming) {
-      if (!msg.includes('החזר')) cat = (catByName('הכנסות נוספות') || {}).id || '';
-      else cat = suggestCat(desc.replace(/^החזר\s*/, ''), false) || '';
+      if (!isRefundText(msg)) cat = (catByName('הכנסות נוספות') || {}).id || '';
+      else cat = suggestCat(refundCore(desc), false) || '';
     } else cat = suggestCat(desc, false) || '';
     const autoSkip = cat === SKIP; if (autoSkip) cat = '';
-    const refundExp = !incoming && /(יתקבל|להתקבל|צפוי)\s*(ה)?החזר|החזר\s*(דרך\s*)?קופה קטנה|קופה קטנה/.test(msg);
+    const refundExp = !incoming && expRe;
     const ra = refundExp ? (msg.match(/החזר\s*של\s*(\d+(?:\.\d+)?)/) || [])[1] : null;
     const base = `${cur.date}T${cur.time}|${cur.sender}|${n.value}|${desc.slice(0, 40)}`;
     seen[base] = (seen[base] || 0) + 1;
@@ -757,7 +772,7 @@ function viewReview() {
     ${!pc.length && !of.length && !rf.length && !dp.length ? `<div class="empty">${I.flower}<h2>הכל <span class="script">מסודר</span></h2><p class="note">אין כרגע מה לבדוק.</p></div>` : ''}`;
 }
 function quickCats(t) {
-  if (t.incoming && !/החזר/.test(t.text)) return cats().filter(c => isIncome(c) && !c.archived);
+  if (t.incoming && !isRefundText(t.text)) return cats().filter(c => isIncome(c) && !c.archived);
   const cnt = {}; for (const it of D.chat) { const c = (D.ov[it.id] || {}).cat || it.cat; if (c) cnt[c] = (cnt[c] || 0) + 1; }
   return cats().filter(c => !c.archived && !isIncome(c)).sort((a, b) => (cnt[b.id] || 0) - (cnt[a.id] || 0)).slice(0, 6);
 }
@@ -800,7 +815,7 @@ function learnSkipSheet(it) {
 function recategorize() {
   const inc = catByName('הכנסות נוספות');
   for (const it of D.chat) {
-    if (it.incoming) it.cat = !/החזר/.test(it.text) ? (inc ? inc.id : '') : (suggestCat(it.desc.replace(/^החזר\s*/, ''), false) || '');
+    if (it.incoming) it.cat = !isRefundText(it.text) ? (inc ? inc.id : '') : (suggestCat(refundCore(it.desc), false) || '');
     else it.cat = suggestCat(it.desc, false) || '';
     it.autoSkip = it.cat === SKIP; if (it.autoSkip) it.cat = '';
   }
@@ -1243,7 +1258,7 @@ async function restore(file) {
   try {
     const d = JSON.parse(await file.text());
     if (!d || !d.cfg || !Array.isArray(d.chat)) throw 0;
-    D = d; migrate(); migrate3(); D.meta.dirty = false; save(false); stack.slice().forEach(e => closeSheet(e)); render(); toast('הנתונים שוחזרו');
+    D = d; migrate(); migrate3(); migrate4(); D.meta.dirty = false; save(false); stack.slice().forEach(e => closeSheet(e)); render(); toast('הנתונים שוחזרו');
     if (S.pendingShare) setTimeout(importPendingShare, 600);
   } catch { toast('זה לא קובץ גיבוי של האפליקציה', 4000); }
 }
@@ -1414,7 +1429,7 @@ window.addEventListener('popstate', () => {
   setTimeout(() => { if (!guardActive) pushGuard(); }, 2200);
 });
 /* =============== installed app: share target + updates =============== */
-const APP_VERSION = '1.5';
+const APP_VERSION = '1.6';
 async function importPendingShare() {
   let c; try { c = await caches.open('shared'); } catch { return; }
   const fr = await c.match('./shared-file'), ir = await c.match('./shared-info');
@@ -1603,7 +1618,7 @@ document.addEventListener('visibilitychange', () => {
   document.body.classList.remove('cover');
   if (hiddenAt && Date.now() - hiddenAt >= (L.grace ?? 60) * 1000) requireUnlock(() => {}); else hiddenAt = 0;
 });
-migrate(); migrate3();
+migrate(); migrate3(); migrate4();
 const sharedNow = new URLSearchParams(location.search).has('shared');
 if (sharedNow) history.replaceState(null, '', location.pathname);
 requireUnlock(() => { render(); if (sharedNow) importPendingShare(); });
