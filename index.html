@@ -154,6 +154,24 @@ nav .dot{position:absolute;top:3px;left:12px;min-width:16px;height:16px;border-r
 .stat b{display:block;font-size:22px}
 .stat span{font-size:11.5px;color:var(--muted)}
 input[type=file]{display:none}
+/* ---- app lock ---- */
+.lock{position:fixed;inset:0;z-index:1000;background:linear-gradient(160deg,#FDE7DC 0%,#F6E1EE 50%,#E2E8FB 100%);display:flex;align-items:center;justify-content:center;padding:24px;overflow:auto}
+.lock-in{width:100%;max-width:340px;text-align:center;display:flex;flex-direction:column;align-items:center;gap:8px}
+.lock-ic{width:76px;height:76px;border-radius:22px;box-shadow:0 6px 20px rgba(120,80,140,.18)}
+.lock h2{margin:8px 0 0;font-size:24px;line-height:1.3}
+.lock p{margin:0;min-height:20px}
+.pdots{display:flex;gap:16px;margin:12px 0 20px;direction:ltr}
+.pdots i{width:14px;height:14px;border-radius:50%;border:2px solid #22243F;display:block}
+.pdots i.on{background:#22243F}
+.pdots.shake{animation:shake .35s}
+@keyframes shake{0%,100%{transform:none}25%{transform:translateX(-8px)}75%{transform:translateX(8px)}}
+.keys{display:grid;grid-template-columns:repeat(3,72px);gap:14px 24px;direction:ltr}
+.keys button{width:72px;height:72px;border-radius:50%;background:rgba(255,255,255,.8);font-size:27px;color:#22243F;box-shadow:0 3px 12px rgba(40,40,90,.08);display:grid;place-items:center}
+.keys span{display:block}
+.linkbtn{margin-top:12px;font-size:14px;color:#9C4A33;padding:10px 14px}
+.lock .primary{max-width:300px}
+body.locked #app,body.locked nav.bottom,body.locked .ov,body.cover #app,body.cover nav.bottom,body.cover .ov{visibility:hidden}
+.toast{z-index:1100}
 /* ---- design 18: sunset palette, Varela Round, handwritten accent words ---- */
 html,body{font-family:'Varela Round',system-ui,sans-serif}
 *{font-weight:400 !important;font-synthesis:none}
@@ -1009,6 +1027,7 @@ function settingsSheet() {
       <button data-act="importset">הגדרות ייבוא <span>›</span></button>
       <button data-act="sync">חיבור לאקסל (ייצוא וטעינה) <span>›</span></button>
       <button data-act="guide">איך כותבים בקבוצה <span>›</span></button>
+      <button data-act="lock">נעילה בקוד / טביעת אצבע <span class="v">${lockOn() ? (L.bio ? 'קוד + טביעת אצבע' : 'קוד') : 'כבויה'}</span></button>
       <button data-act="backup">גיבוי <span class="v">${D.meta.lastBackup ? new Date(D.meta.lastBackup).toLocaleDateString('he-IL') : 'עוד לא'}</span></button>
       <button data-act="restore">שחזור מגיבוי <span>›</span></button>
       <button data-act="checkupd">בדיקת עדכון <span class="v">גרסה ${APP_VERSION}</span></button>
@@ -1200,7 +1219,7 @@ async function restore(file) {
 function wipeSheet() {
   openSheet(() => `${head('מחיקת כל הנתונים')}<p>זה מוחק מהטלפון את כל ההוצאות, ההגדרות, התקציבים והתנועות הקבועות. אי אפשר לבטל.</p>
     <button class="ghost" data-act="backup">קודם ליצור גיבוי</button><button class="primary" id="w-go" style="background:var(--red)">למחוק הכל</button>`, {
-    mount(sh) { sh.addEventListener('click', ev => { if (!ev.target.closest('#w-go')) return; try { localStorage.removeItem(KEY); } catch {} D = null; stack.slice().forEach(e => closeSheet(e)); render(); toast('הכל נמחק'); }); }
+    mount(sh) { sh.addEventListener('click', ev => { if (!ev.target.closest('#w-go')) return; try { localStorage.removeItem(KEY); localStorage.removeItem(LOCK_KEY); } catch {} L = {}; D = null; stack.slice().forEach(e => closeSheet(e)); render(); toast('הכל נמחק'); }); }
   });
 }
 
@@ -1316,6 +1335,7 @@ const ACT = {
   export: () => exportSheet(),
   close: () => closeSheet(),
   update: () => updateSheet(),
+  lock: () => lockSheet(),
   checkupd: () => checkUpdate(),
   'share-now': () => { D = blank(); save(false); importPendingShare(); },
 };
@@ -1363,7 +1383,7 @@ window.addEventListener('popstate', () => {
   setTimeout(() => { if (!guardActive) pushGuard(); }, 2200);
 });
 /* =============== installed app: share target + updates =============== */
-const APP_VERSION = '1.3';
+const APP_VERSION = '1.4';
 async function importPendingShare() {
   let c; try { c = await caches.open('shared'); } catch { return; }
   const fr = await c.match('./shared-file'), ir = await c.match('./shared-info');
@@ -1407,9 +1427,155 @@ if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('sw.js').then(reg => { swReg = reg; watchUpdate(reg); }).catch(() => {});
   navigator.serviceWorker.addEventListener('controllerchange', () => { if (S.updating && !reloading) { reloading = true; location.reload(); } });
 }
+/* =============== app lock: 4-digit code + fingerprint =============== */
+// The code is never stored: only a PBKDF2 hash with a random salt. The fingerprint is checked by Android itself
+// (WebAuthn, platform authenticator, user verification); the app only learns "verified" or not.
+// This is a lock on opening the app, not encryption of the stored data.
+const LOCK_KEY = 'kesef-lock-v1';
+let L = (() => { try { return JSON.parse(localStorage.getItem(LOCK_KEY)) || {}; } catch { return {}; } })();
+const saveLock = () => { try { localStorage.setItem(LOCK_KEY, JSON.stringify(L)); } catch {} };
+const lockOn = () => !!(L.pin && L.pin.hash);
+const b64 = buf => btoa(String.fromCharCode(...new Uint8Array(buf)));
+const unb64 = t => Uint8Array.from(atob(t), c => c.charCodeAt(0));
+const FP_ICON = '<svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="#9C4A33" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M6.5 8.5a6.5 6.5 0 0111 1.5"></path><path d="M5 13c0-1 .1-2 .4-2.9M19 12.5c0 2-.3 3.9-.9 5.6"></path><path d="M8.5 19.5c1-2 1.5-4.3 1.5-6.5a2 2 0 014 0c0 3.1-.6 5.9-1.7 8.3"></path><path d="M12 13c0 2.8-.7 5.4-2 7.5M15.8 15.5c-.2 1.6-.6 3.1-1.2 4.5"></path><path d="M8 4.8A9 9 0 0121 12"></path></svg>';
+async function pinHash(pin, salt, iter) {
+  const k = await crypto.subtle.importKey('raw', new TextEncoder().encode(pin), 'PBKDF2', false, ['deriveBits']);
+  return b64(await crypto.subtle.deriveBits({name: 'PBKDF2', hash: 'SHA-256', salt, iterations: iter}, k, 256));
+}
+async function setPin(pin) {
+  const salt = crypto.getRandomValues(new Uint8Array(16)), iter = 150000;
+  L.pin = {salt: b64(salt), iter, hash: await pinHash(pin, salt, iter)}; L.fails = 0; L.until = 0; if (L.grace == null) L.grace = 60; saveLock();
+}
+async function checkPin(pin) { return !!L.pin && (await pinHash(pin, unb64(L.pin.salt), L.pin.iter)) === L.pin.hash; }
+async function bioSupported() { try { return !!(window.PublicKeyCredential && await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable()); } catch { return false; } }
+async function bioRegister() {
+  const cred = await navigator.credentials.create({publicKey: {challenge: crypto.getRandomValues(new Uint8Array(32)), rp: {name: 'איפה הכסף'},
+    user: {id: crypto.getRandomValues(new Uint8Array(16)), name: 'איפה הכסף', displayName: 'איפה הכסף'},
+    pubKeyCredParams: [{type: 'public-key', alg: -7}, {type: 'public-key', alg: -257}],
+    authenticatorSelection: {authenticatorAttachment: 'platform', userVerification: 'required', residentKey: 'discouraged'}, attestation: 'none', timeout: 60000}});
+  L.bio = {id: b64(cred.rawId)}; saveLock();
+}
+async function bioVerify() {
+  const a = await navigator.credentials.get({publicKey: {challenge: crypto.getRandomValues(new Uint8Array(32)), allowCredentials: [{type: 'public-key', id: unb64(L.bio.id)}], userVerification: 'required', timeout: 60000}});
+  return !!(a && (new Uint8Array(a.response.authenticatorData)[32] & 0x04));   // "user verified" flag
+}
+function pinScreen(o) {
+  const el = document.createElement('div'); el.className = 'lock'; el.setAttribute('role', 'dialog'); el.setAttribute('aria-modal', 'true');
+  let pin = '', busy = false;
+  const paint = err => { el.innerHTML = `<div class="lock-in">
+      <img src="icon-192.png" alt="" class="lock-ic">
+      <h2>${o.title}</h2><p class="note">${err ? `<span class="red">${esc(err)}</span>` : (o.sub || '')}</p>
+      <div class="pdots ${err ? 'shake' : ''}" aria-label="${pin.length} מתוך 4 ספרות">${[0, 1, 2, 3].map(i => `<i class="${i < pin.length ? 'on' : ''}"></i>`).join('')}</div>
+      <div class="keys">${[1, 2, 3, 4, 5, 6, 7, 8, 9].map(n => `<button type="button" data-k="${n}">${n}</button>`).join('')}
+        ${o.bio ? `<button type="button" data-k="bio" aria-label="כניסה בטביעת אצבע">${FP_ICON}</button>` : '<span></span>'}<button type="button" data-k="0">0</button><button type="button" data-k="del" aria-label="מחיקת ספרה">⌫</button></div>
+      ${o.forgot ? '<button type="button" class="linkbtn" data-k="forgot">שכחתי את הקוד</button>' : ''}${o.cancel ? '<button type="button" class="linkbtn" data-k="cancel">ביטול</button>' : ''}
+    </div>`; };
+  paint();
+  el.addEventListener('click', async ev => {
+    const b = ev.target.closest('[data-k]'); if (!b || busy) return;
+    const k = b.dataset.k;
+    if (k === 'bio') return o.bio();
+    if (k === 'forgot') return o.forgot();
+    if (k === 'cancel') { el.remove(); return o.cancel && o.cancel(); }
+    if (k === 'del') { pin = pin.slice(0, -1); return paint(); }
+    if (pin.length >= 4) return;
+    pin += k; paint();
+    if (pin.length === 4) { busy = true; const r = await o.onPin(pin); busy = false; if (r !== true) { pin = ''; if (el.isConnected) paint(r || 'קוד שגוי'); } }
+  });
+  document.body.appendChild(el);
+  return el;
+}
+let locked = false, hiddenAt = 0;
+function requireUnlock(then) {
+  if (!lockOn()) return then();
+  if (locked) return;
+  locked = true; document.body.classList.add('locked');
+  let el = null;
+  const done = () => { locked = false; hiddenAt = 0; document.body.classList.remove('locked', 'cover'); if (el) el.remove(); then(); };
+  const tryBio = async () => { try { if (await bioVerify()) done(); } catch {} };
+  el = pinScreen({title: 'איפה <span class="script">הכסף</span>', sub: L.bio ? 'קוד או טביעת אצבע' : 'הקלידו את הקוד',
+    onPin: async pin => {
+      if (L.until && Date.now() < L.until) return `יותר מדי ניסיונות. אפשר לנסות שוב בעוד ${Math.ceil((L.until - Date.now()) / 1000)} שניות`;
+      if (await checkPin(pin)) { L.fails = 0; L.until = 0; saveLock(); done(); return true; }
+      L.fails = (L.fails || 0) + 1;
+      if (L.fails >= 5) L.until = Date.now() + 30000 * Math.pow(2, Math.min(5, L.fails - 5));
+      saveLock();
+      return L.fails >= 5 ? `יותר מדי ניסיונות. אפשר לנסות שוב בעוד ${Math.ceil((L.until - Date.now()) / 1000)} שניות` : 'קוד שגוי';
+    },
+    bio: L.bio ? tryBio : null, forgot: () => forgotPin()});
+  if (L.bio) setTimeout(tryBio, 400);
+}
+function forgotPin() {
+  const el = document.createElement('div'); el.className = 'lock'; el.style.zIndex = 1001;
+  el.innerHTML = `<div class="lock-in"><h2>שכחתי את הקוד</h2>
+    <p class="note" style="line-height:1.6">אין דרך לשחזר את הקוד – הוא לא נשמר בשום מקום, וזה מה ששומר על הנתונים. האפשרות היחידה היא למחוק את כל הנתונים מהטלפון ולשחזר אותם מקובץ הגיבוי האחרון.</p>
+    <button type="button" class="primary" id="fg-wipe" style="background:var(--red)">מחיקת הנתונים מהטלפון</button>
+    <button type="button" class="linkbtn" id="fg-back">חזרה</button></div>`;
+  el.addEventListener('click', ev => {
+    if (ev.target.closest('#fg-back')) return el.remove();
+    const w = ev.target.closest('#fg-wipe'); if (!w) return;
+    if (!w.dataset.sure) { w.dataset.sure = 1; w.textContent = 'בטוח? לחיצה נוספת מוחקת הכל'; return; }
+    try { localStorage.removeItem(KEY); localStorage.removeItem(LOCK_KEY); } catch {}
+    L = {}; D = null; locked = false; document.body.classList.remove('locked', 'cover');
+    document.querySelectorAll('.lock').forEach(x => x.remove()); render(); toast('הנתונים נמחקו – אפשר לשחזר מגיבוי', 4000);
+  });
+  document.body.appendChild(el);
+}
+function newPinFlow(after) {
+  pinScreen({title: 'בחירת קוד', sub: '4 ספרות שרק אתם יודעים', cancel: () => {}, onPin: async first => {
+    document.querySelectorAll('.lock').forEach(x => x.remove());
+    pinScreen({title: 'שוב, לאישור', sub: 'הקלידו את אותו קוד', cancel: () => {}, onPin: async second => {
+      if (second !== first) return 'הקודים לא זהים – נסו שוב';
+      await setPin(first); document.querySelectorAll('.lock').forEach(x => x.remove()); after(); return true;
+    }});
+    return true;
+  }});
+}
+function verifyPinThen(title, after) {
+  pinScreen({title, sub: 'הקלידו את הקוד הנוכחי', cancel: () => {}, onPin: async pin => {
+    if (!(await checkPin(pin))) return 'קוד שגוי';
+    document.querySelectorAll('.lock').forEach(x => x.remove()); after(); return true;
+  }});
+}
+async function lockSheet() {
+  const bioOk = await bioSupported();
+  const graceOpt = [[0, 'מיד'], [60, 'אחרי דקה'], [300, 'אחרי 5 דקות'], [900, 'אחרי רבע שעה']];
+  openSheet(() => `${head('נעילת האפליקציה')}
+    <p class="note">כשהנעילה פעילה, פתיחת האפליקציה דורשת קוד בן 4 ספרות${bioOk ? ' או טביעת אצבע' : ''}. כשיוצאים מהאפליקציה התוכן מוסתר מיד, וגם לא נראה במסך האפליקציות האחרונות.</p>
+    <div class="actlist">
+      ${lockOn() ? '<button data-l="change">שינוי הקוד <span>›</span></button>' : '<button data-l="set">הפעלת נעילה בקוד <span>›</span></button>'}
+      ${lockOn() && bioOk ? (L.bio ? '<button data-l="bio-off">טביעת אצבע <span class="v">פעילה · לכיבוי</span></button>' : '<button data-l="bio-on">הוספת טביעת אצבע <span>›</span></button>') : ''}
+      ${lockOn() ? `<label style="cursor:default">לבקש קוד כשחוזרים לאפליקציה <select class="inp" id="l-grace" style="width:auto;padding:8px 10px">${graceOpt.map(([v, t]) => `<option value="${v}" ${(L.grace ?? 60) === v ? 'selected' : ''}>${t}</option>`).join('')}</select></label>` : ''}
+      ${lockOn() ? '<button data-l="off" class="danger">כיבוי הנעילה <span>›</span></button>' : ''}
+    </div>
+    ${lockOn() && !bioOk ? '<p class="note">טביעת אצבע לא זמינה בדפדפן הזה – אפשר להשתמש רק בקוד.</p>' : ''}
+    <p class="note">🔒 הקוד לא נשמר – רק "טביעה" חד־כיוונית שלו, ובטלפון בלבד. טביעת האצבע נבדקת על ידי אנדרואיד עצמו, והאפליקציה מקבלת רק "אושר" או "לא אושר". חשוב לזכור: זו נעילה של פתיחת האפליקציה, לא הצפנה של הנתונים בטלפון. אם שוכחים את הקוד – מוחקים ומשחזרים מגיבוי.</p>`, {
+    live: true,
+    mount(sh, e) {
+      sh.addEventListener('change', ev => { if (ev.target.id === 'l-grace') { L.grace = +ev.target.value; saveLock(); toast('נשמר'); } });
+      sh.addEventListener('click', async ev => {
+        const b = ev.target.closest('[data-l]'); if (!b) return;
+        const a = b.dataset.l;
+        if (a === 'set') newPinFlow(() => { e.paint(); render(); toast('הנעילה הופעלה'); });
+        if (a === 'change') verifyPinThen('שינוי הקוד', () => newPinFlow(() => { e.paint(); toast('הקוד הוחלף'); }));
+        if (a === 'off') verifyPinThen('כיבוי הנעילה', () => { L = {}; saveLock(); e.paint(); render(); toast('הנעילה כובתה'); });
+        if (a === 'bio-on') { try { await bioRegister(); e.paint(); render(); toast('טביעת האצבע נוספה'); } catch (err) { toast('לא הצלחתי להוסיף טביעת אצבע' + (err && err.name === 'NotAllowedError' ? ' (בוטל)' : ''), 4000); } }
+        if (a === 'bio-off') { delete L.bio; saveLock(); e.paint(); render(); toast('טביעת האצבע כובתה – נשאר הקוד'); }
+      });
+    }
+  });
+}
+// leaving the app hides its content at once; coming back after the chosen time asks for the code
+document.addEventListener('visibilitychange', () => {
+  if (!lockOn() || locked) return;
+  if (document.hidden) { hiddenAt = Date.now(); document.body.classList.add('cover'); return; }
+  document.body.classList.remove('cover');
+  if (hiddenAt && Date.now() - hiddenAt >= (L.grace ?? 60) * 1000) requireUnlock(() => {}); else hiddenAt = 0;
+});
 migrate(); migrate3();
-render();
-if (new URLSearchParams(location.search).has('shared')) { history.replaceState(null, '', location.pathname); importPendingShare(); }
+const sharedNow = new URLSearchParams(location.search).has('shared');
+if (sharedNow) history.replaceState(null, '', location.pathname);
+requireUnlock(() => { render(); if (sharedNow) importPendingShare(); });
 </script>
 </body>
 </html>
