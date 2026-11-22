@@ -1432,7 +1432,7 @@ window.addEventListener('popstate', () => {
   setTimeout(() => { if (!guardActive) pushGuard(); }, 2200);
 });
 /* =============== installed app: share target + updates =============== */
-const APP_VERSION = '1.7';
+const APP_VERSION = '1.8';
 async function importPendingShare() {
   let c; try { c = await caches.open('shared'); } catch { return; }
   const fr = await c.match('./shared-file'), ir = await c.match('./shared-info');
@@ -1465,15 +1465,17 @@ function updateSheet() {
     mount(sh) { sh.addEventListener('click', ev => { if (!ev.target.closest('#up-go')) return; if (!S.waitingSW) return toast('העדכון כבר הותקן'); S.updating = true; S.waitingSW.postMessage('skip-waiting'); toast('מעדכן…'); }); }
   });
 }
-async function checkUpdate() {
-  if (!swReg) return toast('אפשר לבדוק עדכון רק באפליקציה המותקנת');
-  if (!navigator.onLine) return toast('צריך אינטרנט כדי לבדוק אם יש עדכון');
+// pull-to-refresh (or any reload) = check for an update
+const IS_RELOAD = (() => { try { const n = performance.getEntriesByType('navigation')[0]; return n ? n.type === 'reload' : !!(performance.navigation && performance.navigation.type === 1); } catch { return false; } })();
+async function checkUpdate(auto) {
+  if (!swReg) return auto ? 0 : toast('אפשר לבדוק עדכון רק באפליקציה המותקנת');
+  if (!navigator.onLine) return auto ? 0 : toast('צריך אינטרנט כדי לבדוק אם יש עדכון');
   toast('בודק…');
   try { await swReg.update(); } catch {}
   setTimeout(() => { if (S.waitingSW || swReg.waiting || swReg.installing) { if (swReg.waiting && !S.waitingSW) showUpdate(swReg.waiting); toast('יש גרסה חדשה – ההודעה מופיעה למעלה'); } else toast(`אין גרסה חדשה. מותקנת גרסה ${APP_VERSION}`); }, 2500);
 }
 if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('sw.js').then(reg => { swReg = reg; watchUpdate(reg); }).catch(() => {});
+  navigator.serviceWorker.register('sw.js').then(reg => { swReg = reg; watchUpdate(reg); if (IS_RELOAD) checkUpdate(true); }).catch(() => {});
   navigator.serviceWorker.addEventListener('controllerchange', () => { if (S.updating && !reloading) { reloading = true; location.reload(); } });
 }
 /* =============== app lock: 4-digit code + fingerprint =============== */
@@ -1535,12 +1537,16 @@ function pinScreen(o) {
   return el;
 }
 let locked = false, hiddenAt = 0;
+// "unlocked in this session" survives a reload of the open app, but not closing it (sessionStorage is per app window).
+// While the lock screen is up, or after the app sat in the background past the chosen time, a reload still asks.
+const SES_KEY = 'kesef-session';
+const ses = {get() { try { return JSON.parse(sessionStorage.getItem(SES_KEY)) || {}; } catch { return {}; } }, set(o) { try { sessionStorage.setItem(SES_KEY, JSON.stringify(o)); } catch {} }};
 function requireUnlock(then) {
   if (!lockOn()) return then();
   if (locked) return;
-  locked = true; document.body.classList.add('locked');
+  locked = true; document.body.classList.add('locked'); ses.set({});
   let el = null;
-  const done = () => { locked = false; hiddenAt = 0; document.body.classList.remove('locked', 'cover'); if (el) el.remove(); then(); };
+  const done = () => { locked = false; hiddenAt = 0; ses.set({ok: true}); document.body.classList.remove('locked', 'cover'); if (el) el.remove(); then(); };
   const tryBio = async () => { try { if (await bioVerify()) done(); } catch {} };
   el = pinScreen({title: 'איפה <span class="script">הכסף</span>', sub: L.bio ? 'קוד או טביעת אצבע' : 'הקלידו את הקוד',
     onPin: async pin => {
@@ -1615,16 +1621,20 @@ async function lockSheet() {
   });
 }
 // leaving the app hides its content at once; coming back after the chosen time asks for the code
+// a reload also turns the page "hidden" for a moment (after pagehide) – that is not leaving the app
+let unloading = false; addEventListener('pagehide', () => { unloading = true; });
 document.addEventListener('visibilitychange', () => {
-  if (!lockOn() || locked) return;
-  if (document.hidden) { hiddenAt = Date.now(); document.body.classList.add('cover'); return; }
+  if (!lockOn() || locked || unloading) return;
+  if (document.hidden) { hiddenAt = Date.now(); ses.set({...ses.get(), hiddenAt}); document.body.classList.add('cover'); return; }
   document.body.classList.remove('cover');
-  if (hiddenAt && Date.now() - hiddenAt >= (L.grace ?? 60) * 1000) requireUnlock(() => {}); else hiddenAt = 0;
+  if (hiddenAt && Date.now() - hiddenAt >= (L.grace ?? 60) * 1000) requireUnlock(() => {}); else { hiddenAt = 0; ses.set({...ses.get(), hiddenAt: 0}); }
 });
 migrate(); migrate3(); migrate4();
 const sharedNow = new URLSearchParams(location.search).has('shared');
 if (sharedNow) history.replaceState(null, '', location.pathname);
-requireUnlock(() => { render(); if (sharedNow) importPendingShare(); });
+const s0 = ses.get(), awayTooLong = s0.hiddenAt && Date.now() - s0.hiddenAt >= (L.grace ?? 60) * 1000;
+if (IS_RELOAD && s0.ok && !awayTooLong) { ses.set({ok: true}); render(); if (sharedNow) importPendingShare(); }
+else requireUnlock(() => { render(); if (sharedNow) importPendingShare(); });
 </script>
 </body>
 </html>
