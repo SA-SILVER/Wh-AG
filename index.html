@@ -1187,21 +1187,52 @@ function backupDone() { D.meta.lastBackup = Date.now(); D.meta.dirty = false; sa
 function canShareFile() { try { return !!(navigator.share && navigator.canShare && navigator.canShare({files: [new File(['x'], 'x.txt', {type: 'text/plain'})]})); } catch { return false; } }
 // Android browsers can't overwrite a file or open a real "save as" dialog. Sharing the file lets you pick where it goes
 // (e.g. Files → a "גיבויים" folder); a plain download gets a unique name (date + time) so no "download again?" prompt.
-function backupSheet() {
-  const share = canShareFile();
+// One backup file that is updated every time: the first time the user picks where to save it (Android's save dialog),
+// the file's handle is kept in IndexedDB on this phone, and later backups overwrite that same file.
+const FS_OK = 'showSaveFilePicker' in window;
+function fsDb() { return new Promise((res, rej) => { const r = indexedDB.open('kesef-fs', 1); r.onupgradeneeded = () => r.result.createObjectStore('h'); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); }); }
+async function fsGet() { try { const db = await fsDb(); return await new Promise(res => { const q = db.transaction('h').objectStore('h').get('backup'); q.onsuccess = () => res(q.result || null); q.onerror = () => res(null); }); } catch { return null; } }
+async function fsSet(h) { try { const db = await fsDb(); await new Promise(res => { const t = db.transaction('h', 'readwrite'); h ? t.objectStore('h').put(h, 'backup') : t.objectStore('h').delete('backup'); t.oncomplete = res; t.onerror = res; }); } catch {} }
+async function writeBackup(h) {
+  if (h.queryPermission && (await h.queryPermission({mode: 'readwrite'})) !== 'granted') {
+    if (!h.requestPermission || (await h.requestPermission({mode: 'readwrite'})) !== 'granted') throw Object.assign(new Error('perm'), {name: 'NotAllowedError'});
+  }
+  const w = await h.createWritable(); await w.write(JSON.stringify(D)); await w.close();
+}
+async function pickBackupFile() {
+  return await showSaveFilePicker({suggestedName: 'גיבוי איפה הכסף.json', types: [{description: 'גיבוי איפה הכסף', accept: {'application/json': ['.json']}}]});
+}
+async function backupSheet() {
+  const share = canShareFile(), saved = FS_OK ? await fsGet() : null;
   openSheet(() => `${head('גיבוי')}
-    <p class="note">${D.meta.lastBackup ? `גיבוי אחרון: ${new Date(D.meta.lastBackup).toLocaleString('he-IL')}.` : 'עוד לא נוצר גיבוי.'} הגיבוי שומר תקציבים, קבועות, הזנות ידניות, תיקונים ומילות מפתח (וגם את ההוצאות שיובאו).</p>
-    ${share ? `<button class="primary" id="bk-share">שמירה בשם… (בחירת מקום)</button>
-      <p class="note">נפתח תפריט שיתוף: בוחרים <b>Files</b> (או "הקבצים שלי") ← תיקייה ← שמירה. אם קיים שם קובץ ישן, אפשר למחוק אותו שם.</p>` : ''}
-    <button class="${share ? 'ghost' : 'primary'}" id="bk-dl">הורדה לתיקיית ההורדות</button>
-    <p class="note">כל גיבוי נשמר עם תאריך ושעה בשם, כך שהטלפון לא שואל "להוריד שוב". הדפדפן לא יכול למחוק או להחליף קבצים בעצמו – גיבויים ישנים אפשר למחוק מתיקיית ההורדות. בשחזור בוחרים את האחרון.</p>`, {
-    mount(sh) {
+    <p class="note">${D.meta.lastBackup ? `גיבוי אחרון: ${new Date(D.meta.lastBackup).toLocaleString('he-IL')}.` : 'עוד לא נוצר גיבוי.'} הגיבוי שומר הכל: הוצאות, סעיפים, קבועות, הזנות ידניות, תיקונים ומילות מפתח.</p>
+    ${FS_OK ? (saved ? `<div class="card" style="padding:12px 14px;margin:6px 0"><span class="note">קובץ הגיבוי:</span><div style="margin-top:2px">${esc(saved.name.replace(/\.json$/i, ''))}</div></div>
+        <button class="primary" id="bk-save">גיבוי עכשיו – מעדכן את אותו קובץ</button>
+        <button class="ghost" id="bk-pick">שמירה במקום אחר…</button>`
+      : `<button class="primary" id="bk-pick">שמירה בשם… (בחירת מקום)</button>
+        <p class="note">ייפתח חלון השמירה של הטלפון: בוחרים תיקייה פרטית (למשל תיקייה בשם "גיבויים" – אפשר ליצור אותה מהחלון) ולוחצים שמירה. מהפעם הבאה כל גיבוי יעדכן את אותו קובץ – בלי קבצים כפולים.</p>`)
+      : ''}
+    <p class="note">🔒 לא לבחור בחלון השמירה את Google Drive או שירות ענן אחר, ולא את תיקיית ההורדות.</p>
+    ${FS_OK ? '<details style="margin-top:8px"><summary class="note" style="cursor:pointer">אפשרויות נוספות</summary>' : '<p class="note">הדפדפן הזה לא תומך בעדכון של קובץ קיים, אז הגיבוי יוצא כקובץ חדש:</p>'}
+      ${share ? '<button class="ghost" id="bk-share">שיתוף (למשל Quick Share למחשב)</button>' : ''}
+      <button class="ghost" id="bk-dl">הורדה לתיקיית ההורדות</button>
+    ${FS_OK ? '</details>' : ''}`, {
+    mount(sh, e) {
       sh.addEventListener('click', async ev => {
+        if (ev.target.closest('#bk-save')) {
+          const h = await fsGet(); if (!h) return e.paint();
+          try { await writeBackup(h); backupDone(); closeSheet(); toast('הגיבוי עודכן ✓'); }
+          catch (err) { if (err && err.name === 'AbortError') return; toast('לא הצלחתי לעדכן את הקובץ הקודם – בוחרים שוב מקום לגיבוי', 5000); await fsSet(null); closeSheet(); backupSheet(); }
+        }
+        if (ev.target.closest('#bk-pick')) {
+          try { const h = await pickBackupFile(); await writeBackup(h); await fsSet(h); backupDone(); closeSheet(); toast('הגיבוי נשמר ✓ – מעכשיו כל גיבוי יעדכן את הקובץ הזה'); }
+          catch (err) { if (!err || err.name !== 'AbortError') toast(`השמירה לא עבדה (${err && err.name || 'שגיאה'})`, 5000); }
+        }
         if (ev.target.closest('#bk-dl')) { download(backupName(), backupBlob()); backupDone(); closeSheet(); toast('הגיבוי ירד לתיקיית ההורדות'); }
         if (ev.target.closest('#bk-share')) {
           const f = new File([JSON.stringify(D)], backupName().replace(/\.json$/, '.txt'), {type: 'text/plain'});
-          try { await navigator.share({files: [f]}); backupDone(); closeSheet(); toast('הגיבוי נשמר'); }
-          catch (e) { if (e && e.name !== 'AbortError') toast(`השיתוף לא עבד (${e && e.name || 'שגיאה'}) – אפשר להשתמש בהורדה רגילה`, 5000); }
+          try { await navigator.share({files: [f]}); backupDone(); closeSheet(); toast('הגיבוי נשלח'); }
+          catch (err) { if (err && err.name !== 'AbortError') toast(`השיתוף לא עבד (${err && err.name || 'שגיאה'})`, 5000); }
         }
       });
     }
@@ -1219,7 +1250,7 @@ async function restore(file) {
 function wipeSheet() {
   openSheet(() => `${head('מחיקת כל הנתונים')}<p>זה מוחק מהטלפון את כל ההוצאות, ההגדרות, התקציבים והתנועות הקבועות. אי אפשר לבטל.</p>
     <button class="ghost" data-act="backup">קודם ליצור גיבוי</button><button class="primary" id="w-go" style="background:var(--red)">למחוק הכל</button>`, {
-    mount(sh) { sh.addEventListener('click', ev => { if (!ev.target.closest('#w-go')) return; try { localStorage.removeItem(KEY); localStorage.removeItem(LOCK_KEY); } catch {} L = {}; D = null; stack.slice().forEach(e => closeSheet(e)); render(); toast('הכל נמחק'); }); }
+    mount(sh) { sh.addEventListener('click', ev => { if (!ev.target.closest('#w-go')) return; try { localStorage.removeItem(KEY); localStorage.removeItem(LOCK_KEY); } catch {} fsSet(null); L = {}; D = null; stack.slice().forEach(e => closeSheet(e)); render(); toast('הכל נמחק'); }); }
   });
 }
 
@@ -1383,7 +1414,7 @@ window.addEventListener('popstate', () => {
   setTimeout(() => { if (!guardActive) pushGuard(); }, 2200);
 });
 /* =============== installed app: share target + updates =============== */
-const APP_VERSION = '1.4';
+const APP_VERSION = '1.5';
 async function importPendingShare() {
   let c; try { c = await caches.open('shared'); } catch { return; }
   const fr = await c.match('./shared-file'), ir = await c.match('./shared-info');
