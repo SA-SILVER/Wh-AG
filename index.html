@@ -809,19 +809,36 @@ function viewReview() {
     ${!pc.length && !of.length && !rf.length && !dp.length && !fa.length && !fc.length ? `<div class="empty">${I.flower}<h2>הכל <span class="script">מסודר</span></h2><p class="note">אין כרגע מה לבדוק.</p></div>` : ''}
     ${fixedByGroup(S.month)}`;
 }
-// every fixed expense of the month, grouped by category (group), always up to date with the fixed list and the Excel file
+// every fixed expense of the month, grouped by category (group).
+// What already went out is shown at its actual amount; what has not yet is shown as expected.
+// A month closed in Excel shows the exact amounts from Excel (per section).
+function fixedRows(m) {
+  const fxCats = new Set(fixedFor(m).map(t => t.cat).filter(Boolean));
+  const isFx = c => c && !isIncome(c) && (c.kind === 'fixed' || fxCats.has(c.id));
+  const md = monthData(m), td = todayStr();
+  if (md.closed) {
+    return cats().filter(isFx).map(c => ({cat: c.id, desc: c.name, amount: md.byCat[c.id] || 0, st: 'xl', fid: ''}))
+      .filter(r => r.amount || fxCats.has(r.cat));
+  }
+  return md.list.filter(t => !t.pending && isFx(catById(t.cat))).map(t => t.src === 'fixed'
+    ? {cat: t.cat, desc: t.desc, amount: t.amount, st: t.ok ? 'ok' : t.date <= td ? 'due' : 'exp', day: +t.date.slice(8), fid: t.fid}
+    : {cat: t.cat, desc: t.desc || t.text || '', amount: t.amount, st: 'ok', day: +t.date.slice(8), id: t.id});
+}
 function fixedByGroup(m) {
-  const list = fixedFor(m).filter(t => !isIncome(catById(t.cat)));
-  if (!list.length) return `<div class="label">הוצאות קבועות – ${mName(m)}</div><div class="card"><p class="note" style="margin:4px 0">אין הוצאות קבועות בחודש הזה.</p><div class="chips"><button data-act="fixed" style="color:var(--blue)">לרשימת הקבועות</button></div></div>`;
+  const list = fixedRows(m), closed = isClosed(m);
+  const head = `<div class="label">הוצאות קבועות – ${mName(m)}${closed ? ' · לפי האקסל (נסגר)' : ''}</div>`;
+  if (!list.length) return `${head}<div class="card"><p class="note" style="margin:4px 0">אין הוצאות קבועות בחודש הזה.</p><div class="chips"><button data-act="fixed" style="color:var(--blue)">לרשימת הקבועות</button></div></div>`;
   const by = new Map();
   for (const t of list) { const c = catById(t.cat), g = c && D.cfg.groups.find(x => x.id === c.group); const k = g ? g.id : ''; if (!by.has(k)) by.set(k, {g, items: []}); by.get(k).items.push(t); }
   const blocks = [...by.values()].map(b => ({...b, sum: sumA(b.items)})).sort((a, b) => b.sum - a.sum);
-  const total = sumA(list), td = todayStr();
-  return `<div class="label">הוצאות קבועות – ${mName(m)} · ${ils(total, 0)}</div>
+  const went = sumA(list.filter(t => t.st === 'ok' || t.st === 'xl')), left = sumA(list.filter(t => t.st === 'due' || t.st === 'exp'));
+  const ST = {ok: '<span style="color:var(--green)">ירד ✓</span>', xl: '<span style="color:var(--green)">בפועל ✓</span>', due: 'לאישור', exp: 'צפוי'};
+  return `${head}
+    <div class="card" style="padding:10px 14px;margin-bottom:10px;display:flex;justify-content:space-between;font-size:13.5px"><span>ירד בפועל <b>${ils(went, 0)}</b></span>${closed ? '' : `<span>צפוי עוד <b>${ils(left, 0)}</b></span>`}<span style="color:var(--muted)">סה"כ ${ils(went + left, 0)}</span></div>
     ${blocks.map(b => { const gs = b.g ? groupStyle(b.g) : null; return `<div class="card fxg">
-      <div class="fxg-h">${gs ? `<span class="gicon" style="background:${gs.bg}">${gs.icon}</span>` : ''}<b>${b.g ? esc(b.g.name) : 'בלי סעיף'}</b><span>${b.items.length === 1 ? 'חיוב אחד' : b.items.length + ' חיובים'} · ${ils(b.sum, 0)}</span></div>
-      ${b.items.sort((x, y) => x.date < y.date ? -1 : 1).map(t => `<button class="txline" data-act="fx-edit" data-id="${esc(t.fid)}"><div><div class="a">${ils(t.amount)}</div><div class="d">${esc(t.desc)} · ${esc(catById(t.cat)?.name || '?')}</div></div>
-        <div class="r">${t.ok ? '<span style="color:var(--green)">ירד ✓</span>' : t.date <= td ? 'לאישור' : 'צפוי'}<br>ב-${+t.date.slice(8)} לחודש</div></button>`).join('')}</div>`; }).join('')}`;
+      <div class="fxg-h">${gs ? `<span class="gicon" style="background:${gs.bg}">${gs.icon}</span>` : ''}<b>${b.g ? esc(b.g.name) : 'בלי סעיף'}</b><span>${ils(b.sum, 0)}</span></div>
+      ${b.items.sort((x, y) => (x.day || 0) - (y.day || 0)).map(t => `<button class="txline" ${t.fid ? `data-act="fx-edit" data-id="${esc(t.fid)}"` : t.id ? `data-act="tx" data-id="${esc(t.id)}"` : 'data-act="cat" data-id="' + esc(t.cat) + '"'}><div><div class="a">${ils(t.amount)}</div><div class="d">${esc(t.desc)}${t.st === 'xl' ? '' : ' · ' + esc(catById(t.cat)?.name || '?')}</div></div>
+        <div class="r">${ST[t.st]}${t.day ? `<br>ב-${t.day} לחודש` : ''}</div></button>`).join('')}</div>`; }).join('')}`;
 }
 function quickCats(t) {
   if (t.incoming && !isRefundText(t.text)) return cats().filter(c => isIncome(c) && !c.archived);
@@ -1570,7 +1587,7 @@ window.addEventListener('popstate', () => {
   setTimeout(() => { if (!guardActive) pushGuard(); }, 2200);
 });
 /* =============== installed app: share target + updates =============== */
-const APP_VERSION = '1.13';
+const APP_VERSION = '1.14';
 async function importPendingShare() {
   let c; try { c = await caches.open('shared'); } catch { return; }
   const fr = await c.match('./shared-file'), ir = await c.match('./shared-info');
