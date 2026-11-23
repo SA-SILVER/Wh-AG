@@ -97,6 +97,11 @@ nav .dot{position:absolute;top:3px;left:12px;min-width:16px;height:16px;border-r
 .txline:last-child{border-bottom:0}
 .txline .a{font-weight:800;font-size:15.5px;white-space:nowrap}
 .txline .d{font-size:12px;color:var(--muted);margin-top:3px;line-height:1.4}
+.fxg{padding:6px 12px;margin-bottom:10px}
+.fxg-h{display:flex;align-items:center;gap:8px;padding:6px 2px 4px}
+.fxg-h b{flex:1;font-size:15px}
+.fxg-h span:last-child{font-size:12px;color:var(--muted)}
+.fxg .txline:last-child{border-bottom:0}
 .txline .r{text-align:left;font-size:12px;color:var(--muted);white-space:nowrap}
 .src{font-size:11px;margin-inline-start:4px}
 .banner{display:flex;align-items:center;justify-content:space-between;gap:10px;background:var(--yellow-soft);border-radius:16px;padding:10px 14px;font-size:13.5px;margin:6px 0;width:100%;text-align:right}
@@ -656,7 +661,7 @@ function topBar() {
       <span>${mLabel(m)}</span>
       <button data-act="month" data-k="1" ${m >= addM(curMonth(), 1) ? 'disabled' : ''} aria-label="חודש הבא">${I.l}</button>
     </div>
-    <button class="iconbtn" data-act="import" aria-label="ייבוא צ'אט מווטסאפ" title="ייבוא צ'אט מווטסאפ" style="width:auto;padding:0 12px;border-radius:999px;gap:5px;display:flex;align-items:center;font-size:12.5px;font-weight:600"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M4 18.5V6a2 2 0 012-2h12a2 2 0 012 2v9a2 2 0 01-2 2H8z"/><path d="M12 7.5v6M9.2 10.8L12 13.6l2.8-2.8"/></svg>ייבוא</button>
+    <button class="iconbtn" data-act="sync" aria-label="חיבור לאקסל – ייצוא וטעינה" title="חיבור לאקסל – ייצוא וטעינה" style="width:auto;padding:0 12px;border-radius:999px;gap:5px;display:flex;align-items:center;font-size:12.5px;font-weight:600"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="2.5"/><path d="M4 9.5h16M10 9.5V20"/><path d="M13 13.2h4M13 16.6h4"/></svg>אקסל</button>
   </div>
   ${S.waitingSW ? `<button class="banner" data-act="update" style="background:var(--green-soft)"><span>🆕 יש גרסה חדשה${S.newVersion ? ' (' + esc(S.newVersion.version) + ')' : ''}</span><b>מה חדש ←</b></button>` : ''}
   <div class="fresh">${li ? `מעודכן לפי ייצוא עד ${li.until ? dShort(li.until.slice(0, 10)) + ' ' + li.until.slice(11) : '—'}` : 'עוד לא יובא צ\'אט'}${D.meta.dirty ? ' · <a href="#" data-act="backup" style="color:var(--pink)">יש שינויים שלא גובו</a>' : ''}</div>`;
@@ -801,7 +806,22 @@ function viewReview() {
     ${rf.length ? `<div class="label">מחכות להחזר (${rf.length})</div><div class="card">${rf.map(t => `<div class="txline" style="align-items:center"><div><div class="a">${ils(t.refundAmt || t.amount)}</div><div class="d">${esc(t.text)} · ${dShort(t.date)}</div></div>
         <button class="smallbtn" data-act="rf-done" data-id="${esc(t.id)}">התקבל ✓</button></div>`).join('')}</div>
         <p class="note" style="margin:6px">כשהחזר נכנס, כותבים אותו בקבוצה ("התקבל החזר 200 ..."), והוא יירשם כסכום שלילי בסעיף שתבחרו. כאן רק מסמנים שהעניין סגור.</p>` : ''}
-    ${!pc.length && !of.length && !rf.length && !dp.length && !fa.length && !fc.length ? `<div class="empty">${I.flower}<h2>הכל <span class="script">מסודר</span></h2><p class="note">אין כרגע מה לבדוק.</p></div>` : ''}`;
+    ${!pc.length && !of.length && !rf.length && !dp.length && !fa.length && !fc.length ? `<div class="empty">${I.flower}<h2>הכל <span class="script">מסודר</span></h2><p class="note">אין כרגע מה לבדוק.</p></div>` : ''}
+    ${fixedByGroup(S.month)}`;
+}
+// every fixed expense of the month, grouped by category (group), always up to date with the fixed list and the Excel file
+function fixedByGroup(m) {
+  const list = fixedFor(m).filter(t => !isIncome(catById(t.cat)));
+  if (!list.length) return `<div class="label">הוצאות קבועות – ${mName(m)}</div><div class="card"><p class="note" style="margin:4px 0">אין הוצאות קבועות בחודש הזה.</p><div class="chips"><button data-act="fixed" style="color:var(--blue)">לרשימת הקבועות</button></div></div>`;
+  const by = new Map();
+  for (const t of list) { const c = catById(t.cat), g = c && D.cfg.groups.find(x => x.id === c.group); const k = g ? g.id : ''; if (!by.has(k)) by.set(k, {g, items: []}); by.get(k).items.push(t); }
+  const blocks = [...by.values()].map(b => ({...b, sum: sumA(b.items)})).sort((a, b) => b.sum - a.sum);
+  const total = sumA(list), td = todayStr();
+  return `<div class="label">הוצאות קבועות – ${mName(m)} · ${ils(total, 0)}</div>
+    ${blocks.map(b => { const gs = b.g ? groupStyle(b.g) : null; return `<div class="card fxg">
+      <div class="fxg-h">${gs ? `<span class="gicon" style="background:${gs.bg}">${gs.icon}</span>` : ''}<b>${b.g ? esc(b.g.name) : 'בלי סעיף'}</b><span>${b.items.length === 1 ? 'חיוב אחד' : b.items.length + ' חיובים'} · ${ils(b.sum, 0)}</span></div>
+      ${b.items.sort((x, y) => x.date < y.date ? -1 : 1).map(t => `<button class="txline" data-act="fx-edit" data-id="${esc(t.fid)}"><div><div class="a">${ils(t.amount)}</div><div class="d">${esc(t.desc)} · ${esc(catById(t.cat)?.name || '?')}</div></div>
+        <div class="r">${t.ok ? '<span style="color:var(--green)">ירד ✓</span>' : t.date <= td ? 'לאישור' : 'צפוי'}<br>ב-${+t.date.slice(8)} לחודש</div></button>`).join('')}</div>`; }).join('')}`;
 }
 function quickCats(t) {
   if (t.incoming && !isRefundText(t.text)) return cats().filter(c => isIncome(c) && !c.archived);
@@ -1068,14 +1088,14 @@ function fixedEdit(id) {
 function settingsSheet() {
   openSheet(() => `${head('הגדרות')}
     <div class="actlist">
-      <button data-act="import">ייבוא צ'אט <span class="v">${D.meta.lastImport ? new Date(D.meta.lastImport.at).toLocaleDateString('he-IL') : '—'}</span></button>
+      <button data-act="sync">חיבור לאקסל (ייצוא וטעינה) <span>›</span></button>
       <button data-act="income">הכנסות צפויות <span>›</span></button>
       <button data-act="cats">סעיפים <span>›</span></button>
       <button data-act="fixed">תנועות קבועות <span class="v">${D.fixed.length}</span></button>
       <button data-act="kw">מילות מפתח <span class="v">${D.kw.length}</span></button>
       <button data-act="pays">אמצעי תשלום <span class="v">${D.cfg.pays.length}</span></button>
       <button data-act="importset">הגדרות ייבוא <span>›</span></button>
-      <button data-act="sync">חיבור לאקסל (ייצוא וטעינה) <span>›</span></button>
+      <button data-act="import">ייבוא ידני של צ'אט מווטסאפ <span class="v">${D.meta.lastImport ? new Date(D.meta.lastImport.at).toLocaleDateString('he-IL') : '—'}</span></button>
       <button data-act="guide">איך כותבים בקבוצה <span>›</span></button>
       <button data-act="lock">נעילה בקוד / טביעת אצבע <span class="v">${lockOn() ? (L.bio ? 'קוד + טביעת אצבע' : 'קוד') : 'כבויה'}</span></button>
       <button data-act="backup">גיבוי <span class="v">${D.meta.lastBackup ? new Date(D.meta.lastBackup).toLocaleDateString('he-IL') : 'עוד לא'}</span></button>
@@ -1550,7 +1570,7 @@ window.addEventListener('popstate', () => {
   setTimeout(() => { if (!guardActive) pushGuard(); }, 2200);
 });
 /* =============== installed app: share target + updates =============== */
-const APP_VERSION = '1.12';
+const APP_VERSION = '1.13';
 async function importPendingShare() {
   let c; try { c = await caches.open('shared'); } catch { return; }
   const fr = await c.match('./shared-file'), ir = await c.match('./shared-info');
