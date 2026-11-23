@@ -195,6 +195,10 @@ h1.hero .amt{display:block;font-size:44px;line-height:1.15;color:#9C4A33;margin-
 .stat.kpi div:nth-child(3) span:first-child::before{background:#9FC5EC}
 .stat.kpi b{font-size:21px;color:var(--ink)}
 .stat.kpi b.red{color:var(--red)}
+/* days left in the month, counted from the last WhatsApp export */
+.stat.kpi .mleft{font-size:11px;color:var(--muted)}
+.stat.kpi .mleft i{display:block;height:3px;border-radius:3px;background:#EEF1F7;overflow:hidden;margin:4px 0}
+.stat.kpi .mleft i i{height:100%;margin:0;background:#BFD7F0}
 nav .tabs{background:#FFFFFF;box-shadow:0 10px 30px rgba(0,0,0,.12)}
 nav .tabs button.on{background:#FBE9E1;color:#9C4A33;box-shadow:none}
 nav .dot{background:#E5356B}
@@ -691,6 +695,14 @@ function tips() {
   if (!D.fixed.length) out.push({id: 'fixed', icon: I.ast, act: 'fixed', t: 'משכנתא, ביטוחים והוראות קבע לא נכתבים בקבוצה. קליק כאן כדי להגדיר תנועות קבועות.'});
   return out.filter(x => !S.dismissed.has(x.id));
 }
+// days left in the month as of the last export ("מעודכן לפי ייצוא עד …"), shown only for that month
+function monthLeft(m) {
+  const u = D.meta.lastImport && D.meta.lastImport.until;
+  if (!u || u.slice(0, 7) !== m) return '';
+  const [y, mo, dd] = u.slice(0, 10).split('-').map(Number), dim = new Date(y, mo, 0).getDate(), left = dim - dd;
+  const t = left <= 0 ? 'יום אחרון בחודש' : left === 1 ? 'עוד יום אחד' : `עוד ${left} ימים`;
+  return `<span class="mleft"><i><i style="width:${Math.round(dd / dim * 100)}%"></i></i>${t}</span>`;
+}
 function viewHome() {
   const d = dash(S.month), prev = dash(addM(S.month, -1)), cur = S.month === curMonth();
   const hero = cur ? `עד היום <span class="script">יצאו</span> החודש<span class="amt">${ils(d.spent, 0)}</span>` : S.month > curMonth() ? `ב${mName(S.month)} <span class="script">צפויות</span> הוצאות של<span class="amt">${ils(d.total, 0)}</span>` : `ב${mName(S.month)} <span class="script">יצאו</span><span class="amt">${ils(d.total, 0)}</span>`;
@@ -706,7 +718,7 @@ function viewHome() {
     <div class="stat kpi">
       <div><span>הכנסות</span><b>${fmt(d.incExp, 0)}</b><span>${d.incIn < d.incExp ? `נכנס ${fmt(d.incIn, 0)}` : d.incExp ? 'הכל נכנס' : '—'}</span></div>
       <div><span>הוצאות</span><b>${fmt(d.total, 0)}</b><span>${d.upc ? `מתוכן ${fmt(d.upc, 0)} עוד צפויות` : 'עד עכשיו'}</span></div>
-      <div><span>${d.bal >= 0 ? 'יתרה צפויה' : 'חוסר צפוי'}</span><b class="${d.bal < 0 ? 'red' : ''}">${fmt(Math.abs(d.bal), 0)}</b><span>${d.incExp ? 'הכנסות פחות הוצאות' : 'אין הכנסות מוגדרות'}</span></div>
+      <div><span>${d.bal >= 0 ? 'יתרה צפויה' : 'חוסר צפוי'}</span><b class="${d.bal < 0 ? 'red' : ''}">${fmt(Math.abs(d.bal), 0)}</b><span>${d.incExp ? 'הכנסות פחות הוצאות' : 'אין הכנסות מוגדרות'}</span>${d.closed ? '' : monthLeft(S.month)}</div>
     </div>
     ${ti ? `<div class="panel">${ti}</div>` : ''}
     <div class="sec-title"><h2>לאן <span class="script blue">הלך</span> הכסף?</h2><div class="chip">${prev.total ? `${mName(addM(S.month, -1))}: ${ils(prev.total, 0)}` : ''}</div></div>
@@ -1538,7 +1550,7 @@ window.addEventListener('popstate', () => {
   setTimeout(() => { if (!guardActive) pushGuard(); }, 2200);
 });
 /* =============== installed app: share target + updates =============== */
-const APP_VERSION = '1.11';
+const APP_VERSION = '1.12';
 async function importPendingShare() {
   let c; try { c = await caches.open('shared'); } catch { return; }
   const fr = await c.match('./shared-file'), ir = await c.match('./shared-info');
