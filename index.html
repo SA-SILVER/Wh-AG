@@ -172,6 +172,9 @@ input[type=file]{display:none}
 .lock .primary{max-width:300px}
 body.locked #app,body.locked nav.bottom,body.locked .ov,body.cover #app,body.cover nav.bottom,body.cover .ov{visibility:hidden}
 .toast{z-index:1100}
+/* privacy shield: a plain white screen above everything while the app is in the background */
+#shield{position:fixed;inset:0;background:#fff;z-index:2147483647;display:none}
+body.shield #shield{display:block}
 /* ---- design 18: sunset palette, Varela Round, handwritten accent words ---- */
 html,body{font-family:'Varela Round',system-ui,sans-serif}
 *{font-weight:400 !important;font-synthesis:none}
@@ -1535,7 +1538,7 @@ window.addEventListener('popstate', () => {
   setTimeout(() => { if (!guardActive) pushGuard(); }, 2200);
 });
 /* =============== installed app: share target + updates =============== */
-const APP_VERSION = '1.9';
+const APP_VERSION = '1.10';
 async function importPendingShare() {
   let c; try { c = await caches.open('shared'); } catch { return; }
   const fr = await c.match('./shared-file'), ir = await c.match('./shared-info');
@@ -1699,7 +1702,7 @@ async function lockSheet() {
   const bioOk = await bioSupported();
   const graceOpt = [[0, 'מיד'], [60, 'אחרי דקה'], [300, 'אחרי 5 דקות'], [900, 'אחרי רבע שעה']];
   openSheet(() => `${head('נעילת האפליקציה')}
-    <p class="note">כשהנעילה פעילה, פתיחת האפליקציה דורשת קוד בן 4 ספרות${bioOk ? ' או טביעת אצבע' : ''}. כשיוצאים מהאפליקציה התוכן מוסתר מיד, וגם לא נראה במסך האפליקציות האחרונות.</p>
+    <p class="note">כשהנעילה פעילה, פתיחת האפליקציה דורשת קוד בן 4 ספרות${bioOk ? ' או טביעת אצבע' : ''}. </p>
     <div class="actlist">
       ${lockOn() ? '<button data-l="change">שינוי הקוד <span>›</span></button>' : '<button data-l="set">הפעלת נעילה בקוד <span>›</span></button>'}
       ${lockOn() && bioOk ? (L.bio ? '<button data-l="bio-off">טביעת אצבע <span class="v">פעילה · לכיבוי</span></button>' : '<button data-l="bio-on">הוספת טביעת אצבע <span>›</span></button>') : ''}
@@ -1732,6 +1735,19 @@ document.addEventListener('visibilitychange', () => {
   document.body.classList.remove('cover');
   if (hiddenAt && Date.now() - hiddenAt >= (L.grace ?? 60) * 1000) requireUnlock(() => {}); else { hiddenAt = 0; ses.set({...ses.get(), hiddenAt: 0}); }
 });
+// privacy shield – always on, with or without the lock: the moment the app stops being in front
+// (app switcher, home, another app, notification shade) the screen turns plain white, so no amounts
+// show in the recent-apps screen. "blur" comes before "hidden", so it catches the switcher earlier.
+// An open dropdown or file picker also blurs the page – that is not leaving the app, so it is skipped.
+const shieldEl = document.createElement('div'); shieldEl.id = 'shield'; shieldEl.setAttribute('aria-hidden', 'true'); document.body.appendChild(shieldEl);
+const shieldOn = () => document.body.classList.add('shield');
+const shieldOff = () => { if (!document.hidden) document.body.classList.remove('shield'); };
+addEventListener('blur', () => { const a = document.activeElement; if (a && (a.tagName === 'SELECT' || (a.tagName === 'INPUT' && a.type === 'file'))) return; shieldOn(); });
+addEventListener('focus', shieldOff);
+addEventListener('pagehide', shieldOn);
+addEventListener('pageshow', shieldOff);
+document.addEventListener('visibilitychange', () => { if (document.hidden) shieldOn(); else shieldOff(); });
+addEventListener('pointerdown', shieldOff, true);   // safety net: touching the screen always brings the app back
 migrate(); migrate3(); migrate4();
 const sharedNow = new URLSearchParams(location.search).has('shared');
 if (sharedNow) history.replaceState(null, '', location.pathname);
