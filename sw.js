@@ -3,7 +3,7 @@
 // 2. Receives chats shared from WhatsApp. The shared file is handled here, inside the phone,
 //    and handed to the app; it is never sent anywhere.
 // 3. A new version is downloaded in the background but only takes over when the user taps "update".
-const VERSION = 'kesef-1.10';
+const VERSION = 'kesef-1.11';
 const FILES = ['./', './index.html', './manifest.webmanifest', './icon-192.png', './icon-512.png'];
 
 self.addEventListener('install', e => {
