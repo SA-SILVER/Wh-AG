@@ -102,6 +102,7 @@ nav .dot{position:absolute;top:3px;left:12px;min-width:16px;height:16px;border-r
 .fxg-h b{flex:1;font-size:15px}
 .fxg-h span:last-child{font-size:12px;color:var(--muted)}
 .fxg .txline:last-child{border-bottom:0}
+.catlink{font:inherit;font-weight:700;color:var(--blue);text-decoration:underline;text-underline-offset:3px;padding:2px 0}
 .txline .r{text-align:left;font-size:12px;color:var(--muted);white-space:nowrap}
 .src{font-size:11px;margin-inline-start:4px}
 .banner{display:flex;align-items:center;justify-content:space-between;gap:10px;background:var(--yellow-soft);border-radius:16px;padding:10px 14px;font-size:13.5px;margin:6px 0;width:100%;text-align:right}
@@ -1017,11 +1018,11 @@ function txSheet(id) {
         <button data-act="m-del" data-id="${esc(id)}" class="danger">למחוק <span>🗑</span></button>`;
     return `${head('')}
       <div class="txhero"><div class="amt">${t.amount < 0 ? '−' : ''}${ils(Math.abs(t.amount))}</div>
-        <div class="s"><b>${c ? esc(c.name) : '<span class="red">בלי סעיף</span>'}</b> · ${dShort(t.date)} ${t.time || ''}</div>
+        <div class="s">${c ? `<button class="catlink" data-act="cat" data-id="${esc(c.id)}">${esc(c.name)} ›</button>` : '<b><span class="red">בלי סעיף</span></b>'} · ${dShort(t.date)} ${t.time || ''}</div>
         <div class="s">${SRC_ICON[t.src]} ${t.src === 'chat' ? 'מהווטסאפ' : t.src === 'income' ? (t.ok ? 'הכנסה · אושרה' : 'הכנסה צפויה · עוד לא אושרה') : t.src === 'fixed' ? (t.ok ? 'קבועה · ירדה' : 'קבועה · צפויה') : 'הוזן ידנית'} | ${esc(t.pay || '—')}${t.person ? ' | ' + esc(t.person) : ''}</div>
         ${t.text ? `<div class="orig">${esc(t.text)}</div>` : `<div class="s">${esc(t.desc)}</div>`}
         ${t.note ? `<div class="s">📝 ${esc(t.note)}</div>` : ''}${t.refundExp ? `<div class="s">${t.refundDone ? '✓ ההחזר התקבל' : `צפוי החזר ${ils(t.refundAmt || t.amount)}`}</div>` : ''}</div>
-      <div class="actlist">${acts}</div>`;
+      <div class="actlist">${c ? `<button data-act="cat" data-id="${esc(c.id)}">לסעיף "${esc(c.name)}" – כל התנועות בו <span>›</span></button>` : ''}${acts}</div>`;
   }, {live: true});
 }
 function setOv(id, patch) { D.ov[id] = {...(D.ov[id] || {}), ...patch}; for (const k in D.ov[id]) if (D.ov[id][k] == null) delete D.ov[id][k]; save(); render(); refreshSheets(); }
@@ -1558,13 +1559,18 @@ document.addEventListener('keydown', ev => { if (ev.key === 'Escape' && stack.le
 let swipe = null;
 document.addEventListener('touchstart', ev => {
   swipe = null;
-  if (!D || stack.length || S.view === 'review' || ev.touches.length !== 1) return;
+  if (!D || stack.length || ev.touches.length !== 1) return;
   if (ev.target.closest('input, textarea, select, .chips, nav')) return;
   const t = ev.touches[0]; swipe = {x: t.clientX, y: t.clientY, at: Date.now()};
 }, {passive: true});
-document.addEventListener('touchend', ev => {
-  if (!swipe) return;
-  const t = ev.changedTouches[0], dx = t.clientX - swipe.x, dy = t.clientY - swipe.y, dt = Date.now() - swipe.at;
+// long pages (פירוט, לבדיקה) scroll while the finger moves, and the browser may then end the touch with
+// "touchcancel" instead of "touchend" – so the last position is kept and both endings count.
+document.addEventListener('touchmove', ev => { if (swipe && ev.touches.length === 1) { swipe.lx = ev.touches[0].clientX; swipe.ly = ev.touches[0].clientY; } }, {passive: true});
+document.addEventListener('touchcancel', ev => swipeEnd(swipe && swipe.lx != null ? {clientX: swipe.lx, clientY: swipe.ly} : null), {passive: true});
+document.addEventListener('touchend', ev => swipeEnd(ev.changedTouches[0]), {passive: true});
+function swipeEnd(t) {
+  if (!swipe || !t) { swipe = null; return; }
+  const dx = t.clientX - swipe.x, dy = t.clientY - swipe.y, dt = Date.now() - swipe.at;
   swipe = null;
   if (Math.abs(dx) < 70 || Math.abs(dx) < Math.abs(dy) * 1.8 || dt > 700) return;
   const k = dx > 0 ? -1 : 1, m = addM(S.month, k);
@@ -1572,7 +1578,7 @@ document.addEventListener('touchend', ev => {
   S.month = m; render();
   const app = $('#app'); app.style.transition = 'none'; app.style.opacity = '.4'; app.style.transform = `translateX(${k < 0 ? 24 : -24}px)`;
   requestAnimationFrame(() => { app.style.transition = 'opacity .18s, transform .18s'; app.style.opacity = ''; app.style.transform = ''; });
-}, {passive: true});
+}
 // Back button: closes an open window, then returns to the home screen; leaving needs two presses in a row.
 let guardActive = false;          // a history entry pushed during a tap (browsers honour those)
 function pushGuard() { try { history.pushState({kesef: 1}, ''); } catch {} }
@@ -1587,7 +1593,7 @@ window.addEventListener('popstate', () => {
   setTimeout(() => { if (!guardActive) pushGuard(); }, 2200);
 });
 /* =============== installed app: share target + updates =============== */
-const APP_VERSION = '1.14';
+const APP_VERSION = '1.15';
 async function importPendingShare() {
   let c; try { c = await caches.open('shared'); } catch { return; }
   const fr = await c.match('./shared-file'), ir = await c.match('./shared-info');
