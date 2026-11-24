@@ -3,8 +3,8 @@
 // 2. Receives chats shared from WhatsApp. The shared file is handled here, inside the phone,
 //    and handed to the app; it is never sent anywhere.
 // 3. A new version is downloaded in the background but only takes over when the user taps "update".
-const VERSION = 'kesef-1.15';
-const FILES = ['./', './index.html', './manifest.webmanifest', './icon-192.png', './icon-512.png'];
+const VERSION = 'kesef-2.0';
+const FILES = ['./', './index.html', './app.js', './styles.css', './fonts.css', './lib/xlsx.full.min.js', './manifest.webmanifest', './icon-192.png', './icon-512.png'];
 
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(VERSION).then(c => c.addAll(FILES.map(f => new Request(f, {cache: 'reload'})))));
