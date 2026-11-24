@@ -147,6 +147,14 @@ def main():
         check('sort by amount', amts == sorted(amts, reverse=True), amts)
         ev("S.f.sort = ''")
 
+        print('version history')
+        ev("historySheet()"); pg.wait_for_timeout(500)
+        first = pg.locator('.sheet .hist').first.inner_text() if pg.locator('.sheet .hist').count() else ''
+        check('history lists the installed version first', f'גרסה {appv}' in first and 'מותקנת' in first, first[:120])
+        hist = json.loads((ROOT / 'changelog.json').read_text(encoding='utf-8'))
+        check('changelog has the current version on top', hist[0]['version'] == appv, hist[0])
+        ev("stack.slice().forEach(e => closeSheet(e))")
+
         print('screens render without errors')
         for v in ['home', 'data', 'review']:
             ev(f"ACT.view({{dataset: {{v: '{v}'}}}})")

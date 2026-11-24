@@ -219,3 +219,11 @@ body:has(.ov.on) .toast{bottom:auto;top:18px;transform:translateX(-50%) translat
 body:has(.ov.on) .toast.on{transform:translateX(-50%)}
 .toast.act{width:max-content;display:flex;align-items:center;gap:8px;text-align:right}
 .toast .undo{flex:none}
+
+/* version history */
+.hist{padding:12px 16px;margin-bottom:8px}
+.hist.cur{box-shadow:0 0 0 2px #FBE9E1, var(--shadow)}
+.hist-h{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:4px}
+.hist-h span{font-size:13px;color:var(--muted)}
+.hist p{margin:5px 0;line-height:1.5;font-size:14px}
+.hist summary{cursor:pointer;font-size:14px;color:var(--muted);line-height:1.5}

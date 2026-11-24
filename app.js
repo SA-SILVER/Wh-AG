@@ -1059,6 +1059,7 @@ function settingsSheet() {
       <button data-act="backup">גיבוי <span class="v">${D.meta.lastBackup ? new Date(D.meta.lastBackup).toLocaleDateString('he-IL') : 'עוד לא'}</span></button>
       <button data-act="restore">שחזור מגיבוי <span>›</span></button>
       <button data-act="checkupd">בדיקת עדכון <span class="v">גרסה ${APP_VERSION}</span></button>
+      <button data-act="history">היסטוריית גרסאות <span>›</span></button>
       <button data-act="wipe" class="danger">מחיקת כל הנתונים מהטלפון <span>🗑</span></button>
     </div>
     <p class="note">הכל נשמר רק בדפדפן בטלפון הזה. ניקוי נתוני הדפדפן מוחק אותו – לכן כדאי לגבות אחרי שינויים בתקציבים, בקבועות או בתיקונים. את ההוצאות עצמן תמיד אפשר לייבא שוב מהצ'אט.</p>`);
@@ -1564,6 +1565,7 @@ const ACT = {
   update: () => updateSheet(),
   lock: () => lockSheet(),
   checkupd: () => checkUpdate(),
+  history: () => historySheet(),
   'share-now': () => { D = blank(); save(false); importPendingShare(); },
 };
 document.addEventListener('click', ev => {
@@ -1617,7 +1619,7 @@ window.addEventListener('popstate', () => {
   setTimeout(() => { if (!guardActive) pushGuard(); }, 2200);
 });
 /* =============== installed app: share target + updates =============== */
-const APP_VERSION = '2.0';
+const APP_VERSION = '2.1';
 async function importPendingShare() {
   let c; try { c = await caches.open('shared'); } catch { return; }
   const fr = await c.match('./shared-file'), ir = await c.match('./shared-info');
@@ -1640,6 +1642,16 @@ function watchUpdate(reg) {
   if (reg.waiting && navigator.serviceWorker.controller) showUpdate(reg.waiting);
   reg.addEventListener('updatefound', () => { const w = reg.installing; if (w) w.addEventListener('statechange', () => { if (w.state === 'installed' && navigator.serviceWorker.controller) showUpdate(w); }); });
   setInterval(() => reg.update().catch(() => {}), 6 * 3600e3);
+}
+// what changed in every version, newest first (the list comes with the app, so it works offline)
+async function historySheet() {
+  let h = [];
+  try { h = await (await fetch('changelog.json')).json(); } catch {}
+  openSheet(() => `${head('היסטוריית גרסאות')}
+    ${h.length ? h.map((v, i) => `<div class="card hist${v.version === APP_VERSION ? ' cur' : ''}">
+      <div class="hist-h"><b>גרסה ${esc(v.version)}</b><span>${v.date ? dShort(v.date) : ''}${v.version === APP_VERSION ? ' · מותקנת' : ''}</span></div>
+      ${i < 3 ? v.notes.map(n => `<p>• ${esc(n)}</p>`).join('') : `<details><summary>${v.notes.length === 1 ? esc(v.notes[0]).slice(0, 60) + (v.notes[0].length > 60 ? '…' : '') : v.notes.length + ' שינויים'}</summary>${v.notes.map(n => `<p>• ${esc(n)}</p>`).join('')}</details>`}
+    </div>`).join('') : '<p class="note">לא הצלחתי לטעון את הרשימה. היא תופיע אחרי העדכון הבא.</p>'}`);
 }
 function updateSheet() {
   const v = S.newVersion || {};

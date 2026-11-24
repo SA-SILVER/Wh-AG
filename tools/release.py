@@ -1,6 +1,6 @@
 """Sets the app version in every place that needs it, from one command.
 Usage: python3 tools/release.py 1.16 "first note" "second note" ...
-Writes: app.js (APP_VERSION), sw.js (cache name), version.json (version, date, notes).
+Writes: app.js (APP_VERSION), sw.js (cache name), version.json (version, date, notes), changelog.json (history, newest first).
 """
 import sys, re, json, datetime, pathlib
 root = pathlib.Path(__file__).resolve().parent.parent
@@ -13,4 +13,9 @@ sw = root / 'sw.js'; s = sw.read_text(encoding='utf-8')
 s, n = re.subn(r"const VERSION = 'kesef-[^']*';", f"const VERSION = 'kesef-{v}';", s); assert n == 1
 sw.write_text(s, encoding='utf-8')
 (root / 'version.json').write_text(json.dumps({'version': v, 'date': datetime.date.today().isoformat(), 'notes': notes}, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+ch = root / 'changelog.json'
+hist = json.loads(ch.read_text(encoding='utf-8')) if ch.exists() else []
+hist = [h for h in hist if h['version'] != v]
+hist.insert(0, {'version': v, 'date': datetime.date.today().isoformat(), 'notes': notes})
+ch.write_text(json.dumps(hist, ensure_ascii=False, indent=1) + '\n', encoding='utf-8')
 print('version', v)
