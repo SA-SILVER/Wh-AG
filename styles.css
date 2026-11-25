@@ -233,3 +233,5 @@ body:has(.ov.on) .toast.on{transform:translateX(-50%)}
 .hist-h span{font-size:13px;color:var(--muted)}
 .hist p{margin:5px 0;line-height:1.5;font-size:14px}
 .hist summary{cursor:pointer;font-size:14px;color:var(--muted);line-height:1.5}
+/* income sections among the quick choices for money that came in */
+.chips button.incchip{color:var(--green);font-weight:600}

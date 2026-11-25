@@ -726,7 +726,7 @@ function viewHome() {
       <div data-act="incdet"><span>הכנסות</span><b>${fmt(d.incExp, 0)}</b><span>${d.incIn < d.incExp ? `נכנס ${fmt(d.incIn, 0)}` : d.incExp ? 'הכל נכנס' : '—'}</span></div>
       ${past ? `<div data-act="view" data-v="review" data-rv="fixed"><span>מתוכן קבועות</span><b>${fmt(fxTot, 0)}</b><span>משכנתא, הו"ק וכד'</span></div>`
         : `<div data-act="view" data-v="review" data-rv="fixed"><span>עוד צפוי לרדת</span><b>${fmt(d.upc, 0)}</b><span>${upN ? `${upN === 1 ? 'חיוב קבוע אחד' : upN + ' חיובים קבועים'}` : 'הקבועות כבר ירדו'}</span></div>`}
-      <div data-act="baldet"><span>${past ? (d.bal >= 0 ? 'עודף' : 'חוסר') : (d.bal >= 0 ? 'יתרה צפויה' : 'חוסר צפוי')}</span><b class="${d.bal < 0 ? 'red' : ''}">${fmt(Math.abs(d.bal), 0)}</b><span>${!d.incExp ? 'אין הכנסות מוגדרות' : !past && d.upc ? 'כולל ההוצאות הקבועות שצפויות לרדת בהמשך' : 'הכנסות פחות הוצאות'}</span>${d.closed ? '' : monthLeft(S.month)}</div>
+      <div data-act="baldet"><span>${past ? (d.bal >= 0 ? 'עודף' : 'חוסר') : (d.bal >= 0 ? 'יתרה צפויה' : 'חוסר צפוי')}</span><b class="${d.bal < 0 ? 'red' : ''}">${fmt(Math.abs(d.bal), 0)}</b><span>${!d.incExp ? 'אין הכנסות מוגדרות' : !past && d.upc ? 'כולל הקבועות שצפויות לרדת' : 'הכנסות פחות הוצאות'}</span>${d.closed ? '' : monthLeft(S.month)}</div>
     </div>
     ${ti ? `<div class="panel">${ti}</div>` : ''}
     <div class="sec-title"><h2>לאן <span class="script blue">הלך</span> הכסף?</h2><div class="chip">${pTot ? (cur ? `עד ${today} ב${mName(pm)}: ${ils(pTot, 0)}` : `${mName(pm)}: ${ils(pTot, 0)}`) : ''}</div></div>
@@ -813,6 +813,7 @@ function viewReview() {
     ${ra.length ? `<div class="label">על איזו הוצאה ההחזר? (${ra.length})</div>${ra.map(t => `<div class="card rv"><div class="meta"><span>${dShort(t.date)} ${t.time || ''} · ${esc(t.person || '')}</span><span class="amt green">+${ils(Math.abs(t.amount))}</span></div>
         <div class="t">${esc(t.text)}</div>
         <div class="chips">${t.rfAsk.map(e => `<button data-act="rf-link" data-id="${esc(t.id)}" data-e="${esc(e)}">${esc(rfLabel(e))}</button>`).join('')}
+          ${incCats().map(c => `<button data-act="rf-inc" data-id="${esc(t.id)}" data-c="${esc(c.id)}" class="incchip">+ ${esc(c.name)}</button>`).join('')}
           <button data-act="rf-none" data-id="${esc(t.id)}" style="color:var(--muted)">לא קשור להוצאה – לבחור סעיף</button></div></div>`).join('')}` : ''}
     ${pc.length ? `<div class="label">לבחור סעיף (${pc.length}${pendGroups().length < pc.length ? ` שורות ב-${pendGroups().length} קבוצות` : ''})</div>${pendGroups().map(rvGroup).join('')}` : ''}
     ${of.length ? `<div class="label">קבועות והכנסות לאישור – כמה ירד / נכנס בפועל?</div><div class="card">${of.map(f => `<div class="txline" style="align-items:center"><div><div class="a">${ils(f.amount)}</div><div class="d">${esc(f.desc)} · ${esc(catById(f.cat)?.name || '')} · ${dShort(f.date)}</div></div>
@@ -870,7 +871,7 @@ function rvGroup(g) {
   return `<div class="card rv">
     ${n === 1 ? `<div class="meta"><span>${dShort(t.date)} ${t.time || ''} · ${esc(t.person || '')}</span><span class="amt ${t.incoming ? 'green' : ''}">${t.incoming ? '+' : ''}${ils(Math.abs(t.amount))}</span></div><div class="t">${esc(t.text)}</div>`
       : `<div class="meta"><span><b style="font-size:16px;color:var(--ink)">${esc(t.desc || t.text)}</b> ×${n}</span><span class="amt">${ils(Math.abs(sumA(g.items)))}</span></div>${lines}${n > 3 ? `<div class="note" style="margin:2px 0 0">ועוד ${n - 3}</div>` : ''}`}
-    <div class="chips">${quickCats(t).map(c => `<button data-act="rvg-cat" data-g="${gk}" data-c="${c.id}">${esc(c.name)}</button>`).join('')}
+    <div class="chips">${quickCats(t).map(c => `<button data-act="rvg-cat" data-g="${gk}" data-c="${c.id}"${incChip(c)}>${isIncome(c) ? '+ ' : ''}${esc(c.name)}</button>`).join('')}
       <button data-act="rvg-more" data-g="${gk}" style="color:var(--blue);font-weight:600">סעיף אחר…</button>
       <button data-act="rvg-skip" data-g="${gk}" style="color:var(--muted)">לא לייבא</button></div>
     ${word ? `<label class="rvlearn"><input type="checkbox" data-learn="${gk}" ${S.noLearn && S.noLearn.has(g.key) ? '' : 'checked'}> לזכור: <input class="inp" data-lw="${gk}" value="${esc(S.lw && S.lw[g.key] != null ? S.lw[g.key] : word)}"></label>` : ''}
@@ -878,9 +879,9 @@ function rvGroup(g) {
 }
 function multiNums() { return cached('multi', () => D.chat.filter(it => it.multi && !(D.ov[it.id] || {}).numOk).map(it => chatTx(it)).filter(t => t && !t.skipped && t.date >= D.cfg.start && !isClosed(t.month))); }
 // sections that fit this line: from keywords and from lines with shared words that already have a section, then the most used
+// sections that fit this line: for money that came in – the likely expense sections (a refund) and also the income sections
 function quickCats(t) {
-  const wantInc = t.incoming && !rfIsIn(chatItem(t.id));
-  const ok = c => c && !c.archived && (wantInc ? isIncome(c) : !isIncome(c));
+  const ok = c => c && !c.archived && !isIncome(c);
   const idx = cached('wordIdx', () => {
     const w = new Map(), cnt = {};
     for (const it of D.chat) { const c = (D.ov[it.id] || {}).cat || it.cat; if (!c) continue; cnt[c] = (cnt[c] || 0) + 1;
@@ -891,13 +892,22 @@ function quickCats(t) {
   for (const x of learnWords(t)) { const k = x.toLowerCase(); const m = idx.w.get(k); if (m) for (const c in m) score[c] = (score[c] || 0) + 10 * m[c];
     for (const [kw, c] of D.kw) { const kk = String(kw).toLowerCase().trim(); if (kk.length >= 3 && (kk.includes(k) || k.includes(kk))) score[c] = (score[c] || 0) + 25; } }
   for (const c in idx.cnt) score[c] = (score[c] || 0) + idx.cnt[c] / 1000;
-  const list = cats().filter(ok).sort((a, b) => (score[b.id] || 0) - (score[a.id] || 0));
-  return list.slice(0, 6);
+  const by = (a, b) => (score[b.id] || 0) - (score[a.id] || 0);
+  const list = cats().filter(ok).sort(by);
+  if (!t.incoming) return list.slice(0, 6);
+  return [...list.slice(0, 4), ...incCats(score)];
 }
+const incCats = score => cats().filter(c => isIncome(c) && !c.archived).sort((a, b) => ((score || {})[b.id] || 0) - ((score || {})[a.id] || 0)).slice(0, 4);
+const incChip = c => isIncome(c) ? ' class="incchip"' : '';
 function groupPick(key, cat) {
   const g = pendGroups().find(x => x.key === key); if (!g) return;
   const learn = $(`[data-learn="${CSS.escape(key)}"]`), word = ($(`[data-lw="${CSS.escape(key)}"]`) || {}).value || '';
-  for (const t of g.items) { D.ov[t.id] = {...(D.ov[t.id] || {}), ...(cat === SKIP ? {skip: true} : {cat})}; if (t.rfPre && cat !== SKIP) D.ov[t.rfOf] = {...(D.ov[t.rfOf] || {}), cat}; }
+  const inc = cat !== SKIP && isIncome(catById(cat));
+  for (const t of g.items) {
+    D.ov[t.id] = {...(D.ov[t.id] || {}), ...(cat === SKIP ? {skip: true} : {cat})};
+    if (inc && t.incoming) D.ov[t.id].rfOf = 'none';
+    else if (t.rfPre && cat !== SKIP) D.ov[t.rfOf] = {...(D.ov[t.rfOf] || {}), cat};
+  }
   let msg = cat === SKIP ? (g.items.length === 1 ? 'השורה לא תיספר' : `${g.items.length} שורות לא ייספרו`) : (g.items.length === 1 ? `← ${catById(cat).name}` : `${g.items.length} שורות ← ${catById(cat).name}`);
   if (learn && learn.checked && word.trim()) { const w = word.trim(); D.kw = D.kw.filter(([k]) => k !== w); D.kw.push([w, cat]); recategorize(); msg += ` · "${w}" נלמד`; }
   save(); render(); toast(msg);
@@ -908,7 +918,8 @@ function setChatCat(id, cat) {
   const L = refundLinks(), ex = it.incoming && L.of[id];
   // tied to an expense from before the budget start: the section goes to that expense (its other refunds follow);
   // tied to an expense inside the budget: a section chosen by hand unties it
-  if (ex && L.pre[ex]) D.ov[ex] = {...(D.ov[ex] || {}), cat};
+  if (it.incoming && isIncome(catById(cat))) D.ov[id].rfOf = 'none';     // income: not a refund of anything
+  else if (ex && L.pre[ex]) D.ov[ex] = {...(D.ov[ex] || {}), cat};
   else if (ex) D.ov[id].rfOf = 'none';
   save(); render(); refreshSheets();
   if (!it.incoming) learnSheet(it, cat);
@@ -1690,6 +1701,7 @@ const ACT = {
   't-skip': el => { const t = findTx(el.dataset.id); if (t.skipped) { setOv(el.dataset.id, {skip: t.autoSkip ? false : null}); toast('השורה הוחזרה'); } else { setOv(el.dataset.id, {skip: true}); closeSheet(); toast('השורה לא תיספר'); } },
   'rf-done': el => { const id = el.dataset.id, st = rfState(id), v = !st.done; setOv(id, {refundDone: v === st.auto ? null : v}); },
   'rf-link': el => { setOv(el.dataset.id, {rfOf: el.dataset.e, cat: null}); toast('ההחזר חובר להוצאה'); },
+  'rf-inc': el => { setOv(el.dataset.id, {rfOf: 'none', cat: el.dataset.c}); toast(`← ${catById(el.dataset.c).name}`); },
   'rf-none': el => { setOv(el.dataset.id, {rfOf: 'none'}); toast('ההחזר לא מחובר להוצאה – אפשר לבחור לו סעיף'); },
   'rf-pick': el => { const id = el.dataset.id; openSheet(() => `${head('לאיזו הוצאה שייך ההחזר?')}<div class="actlist">${rfChoices(id).map(e => `<button data-e="${esc(e)}">${esc(rfLabel(e))} <span>↩︎</span></button>`).join('')}</div>`,
     {mount(sh) { sh.addEventListener('click', ev => { const b = ev.target.closest('[data-e]'); if (b) { closeSheet(); setOv(id, {rfOf: b.dataset.e, cat: null}); toast('ההחזר חובר להוצאה'); } }); }}); },
@@ -1789,7 +1801,7 @@ window.addEventListener('popstate', () => {
   setTimeout(() => { if (!guardActive) pushGuard(); }, 2200);
 });
 /* =============== installed app: share target + updates =============== */
-const APP_VERSION = '2.5';
+const APP_VERSION = '2.6';
 async function importPendingShare() {
   let c; try { c = await caches.open('shared'); } catch { return; }
   const fr = await c.match('./shared-file'), ir = await c.match('./shared-info');
