@@ -32,6 +32,16 @@ CHAT = "\n".join([
     "10/11/2026, 08:00 - שי: התקבל משכורת 14000",
 ])
 
+def wait_js(page, expr, tries=100):
+    # polls from outside the page: the page's security policy blocks Playwright's own in-page polling
+    import time
+    for _ in range(tries):
+        try:
+            if page.evaluate(expr): return
+        except Exception: pass
+        time.sleep(0.1)
+    raise AssertionError('timeout: ' + expr)
+
 def serve():
     class Quiet(http.server.SimpleHTTPRequestHandler):
         def log_message(self, *a): pass
@@ -203,6 +213,22 @@ def main():
         check('…then it comes off that expense section as a minus', pre['amount'] == -380 and pre['cat'] == 'c3' and pre['expCat'] == 'c3', pre)
         check('…and is not in the Excel export of the month before the start', ev("monthTx('2026-08').length") == 0)
 
+        print('money in without "החזר"')
+        imp("\n".join([
+            "01/12/2026, 10:00 - שי: 260 שח ספרים לקורס, צריך להתקבל החזר",
+            "05/12/2026, 10:00 - שי: התקבל 260",
+            "06/12/2026, 10:00 - שי: התקבל 500 מתנה",
+        ]))
+        g = lambda part: ev("p => { const t = chatTx(D.chat.find(i => i.text.includes(p))); return {amount: t.amount, cat: t.cat, rfOf: !!t.rfOf, pending: t.pending, inc: isIncome(catById(t.cat))}; }", part)
+        check('"התקבל 260" (no "החזר") comes off the expense that waited', g('התקבל 260')['rfOf'] and g('התקבל 260')['amount'] == -260, g('התקבל 260'))
+        check('"התקבל" with no income word is not counted as income – asks for a section', g('500 מתנה')['pending'] and not g('500 מתנה')['inc'], g('500 מתנה'))
+        check('…offering expense sections', ev("() => quickCats(chatTx(D.chat.find(i => /500 מתנה/.test(i.text)))).every(c => !isIncome(c))"))
+        check('"התקבל משכורת" stays income', g('משכורת')['cat'] == 'c2' and g('משכורת')['amount'] == 14000)
+        retro = ev("() => { const it = D.chat.find(i => /500 מתנה/.test(i.text)); it.cat = 'c23'; D.v = 5; migrate6(); return {cat: it.cat, v: D.v}; }")
+        check('applied to lines already in the app (old "הכנסות נוספות" removed)', retro['cat'] == '' and retro['v'] == 6, retro)
+        ev("() => { const id = D.chat.find(i => /500 מתנה/.test(i.text)).id; D.ov[id] = {cat: 'c23'}; save(false); }")
+        check('income chosen by hand is kept', g('500 מתנה')['cat'] == 'c23' and g('500 מתנה')['amount'] == 500)
+
         print('home squares')
         ev("S.month = '2026-11'; ACT.view({dataset: {v: 'home'}})")
         pg.locator('[data-act=incdet]').click(); pg.wait_for_timeout(300)
@@ -212,6 +238,14 @@ def main():
         ev("S.month = '2026-10'; ACT.view({dataset: {v: 'home'}})")
         pg.locator('.kpi [data-rv=fixed]').click(); pg.wait_for_timeout(250)
         check('tapping "מתוכן קבועות" goes to the fixed charges', ev("S.view") == 'review' and ev("S.rv") == 'fixed')
+
+        ev("S.month = '2026-11'; ACT.view({dataset: {v: 'home'}})")
+        pg.locator('[data-act=baldet]').click(); pg.wait_for_timeout(300)
+        btxt = pg.locator('.sheet').last.inner_text() if pg.locator('.sheet').count() else ''
+        check('tapping the balance shows how it is made (income − out − fixed still to come)', 'הכנסות' in btxt and 'קבועות שעוד צפויות' in btxt and 'לא נכללות' in btxt, btxt[:300])
+        ev("stack.slice().forEach(e => closeSheet(e))"); pg.wait_for_timeout(250)
+        sel = ev("({body: getComputedStyle(document.body).userSelect, inp: (() => { const i = document.createElement('input'); document.body.appendChild(i); const v = getComputedStyle(i).userSelect; i.remove(); return v; })()})")
+        check('text on the screen can\'t be selected, typing fields can', sel['body'] == 'none' and sel['inp'] != 'none', sel)
 
         print('fits the phone')
         vp = pg.locator('meta[name=viewport]').get_attribute('content')
@@ -233,9 +267,9 @@ def main():
             ev(f"S.month = '{m}'; render()")
         check('no script errors', not errs, errs[:3])
         print('moving data from the old storage')
-        ctx2 = b.new_context(); p2 = ctx2.new_page(); p2.goto(url); p2.wait_for_function('typeof render === "function"')
+        ctx2 = b.new_context(); p2 = ctx2.new_page(); p2.goto(url); wait_js(p2, 'typeof render === "function"')
         p2.evaluate("async () => { const d = blank(); d.chat = [{id: 'x#1', date: '2026-11-01', time: '10:00', sender: 'a', person: 'a', text: '5 קפה', desc: 'קפה', amount: 5, cat: ''}]; await IDB.del('D'); localStorage.setItem(KEY, JSON.stringify(d)); }")
-        p2.reload(); p2.wait_for_function('typeof render === "function" && D')
+        p2.reload(); wait_js(p2, 'typeof render === "function" && !!D')
         moved = p2.evaluate("async () => ({n: D.chat.length, ls: localStorage.getItem(KEY), idb: !!(await IDB.get('D'))})")
         check('old data moved to the browser database, old copy removed', moved['n'] == 1 and moved['ls'] is None and moved['idb'], moved)
         ctx2.close()

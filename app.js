@@ -83,7 +83,7 @@ function groupStyle(g) {
 
 /* =============== storage =============== */
 let D = null;
-function blank() { const d = clone(DEFAULTS); if (!d.cfg.start) d.cfg.start = addM(curMonth(), -1) + '-01'; return {v: 5, cfg: d.cfg, kw: d.kw, chat: [], ov: {}, fixed: [], fixedM: {}, manual: [], meta: {dirty: false}}; }
+function blank() { const d = clone(DEFAULTS); if (!d.cfg.start) d.cfg.start = addM(curMonth(), -1) + '-01'; return {v: 6, cfg: d.cfg, kw: d.kw, chat: [], ov: {}, fixed: [], fixedM: {}, manual: [], meta: {dirty: false}}; }
 // The data lives in the browser's database on this phone (IndexedDB): much more room than the old
 // localStorage (about 5MB), and still only on this phone. Data from older versions is moved over once.
 const IDB = {
@@ -175,6 +175,12 @@ function migrate5() {
   recategorize();
   D.v = 5; save(false, {noUndo: true});
 }
+// v6: "התקבל ..." without an income keyword is a refund, not "הכנסות נוספות" – applied to every line already in the app
+function migrate6() {
+  if (!D || (D.v || 1) >= 6) return;
+  recategorize();
+  D.v = 6; save(false, {noUndo: true});
+}
 try { navigator.storage && navigator.storage.persist && navigator.storage.persist(); } catch {}
 
 /* =============== model =============== */
@@ -208,7 +214,10 @@ function rfWords(t) {
 const rfShort = d => String(d || '').replace(new RegExp(REFUND_EXP.source, 'g'), ' ').replace(/(?<![֐-׿])(צריך|עבור|אמור)(?![֐-׿])/g, ' ').replace(/[,]+/g, ' ').replace(/ {2,}/g, ' ').trim();
 const chatItem = id => D.chat.find(x => x.id === id) || (D.rfPre || []).find(x => x.id === id);
 const rfSkipped = it => { const o = D.ov[it.id] || {}; return o.skip === true || (it.autoSkip && o.skip !== false); };
-const rfIsIn = it => !!it.incoming && isRefundText(it.text || '');
+// money that came in is a refund (it comes off an expense) – unless a keyword ("משכורת") or a hand choice puts it in an income section
+const rfIsIn = it => { if (!it || !it.incoming) return false; if (isRefundText(it.text || '')) return true; const o = D.ov[it.id] || {}; return !isIncome(catById(o.cat || it.cat)); };
+// the section of a line of money in: an income section only by an income keyword, otherwise an expense section (refund)
+const inCat = (text, desc) => (!isRefundText(text) && suggestCat(desc, true)) || suggestCat(refundCore(desc), false) || '';
 const rfAmtOf = it => { const o = D.ov[it.id] || {}; return o.amount != null ? o.amount : it.amount; };
 // how much should come back: "החזר של 300" if written, otherwise the whole expense (after a corrected amount)
 const rfWant = it => { const o = D.ov[it.id] || {}; return it.refundAmt && it.refundAmt !== it.amount ? it.refundAmt : rfAmtOf(it); };
@@ -505,8 +514,7 @@ function parseChat(text) {
     const incoming = msg.startsWith('התקבל') || desc.startsWith('התקבל') || ((IN_VERB.test(msg) || IN_VERB.test(desc)) && isRefundText(msg)) || desc.startsWith('החזר') || (!expRe && CREDIT_W.test(msg));
     let cat = '';
     if (incoming) {
-      if (!isRefundText(msg)) cat = suggestCat(desc, true) || (catByName('הכנסות נוספות') || {}).id || '';   // "התקבל משכורת" → the salary section
-      else cat = suggestCat(refundCore(desc), false) || '';
+      cat = inCat(msg, desc);     // "התקבל משכורת" → the salary section; "התקבל 300" → a refund, off an expense
     } else cat = suggestCat(desc, false) || '';
     const autoSkip = cat === SKIP; if (autoSkip) cat = '';
     const refundExp = !incoming && expRe;
@@ -718,7 +726,7 @@ function viewHome() {
       <div data-act="incdet"><span>הכנסות</span><b>${fmt(d.incExp, 0)}</b><span>${d.incIn < d.incExp ? `נכנס ${fmt(d.incIn, 0)}` : d.incExp ? 'הכל נכנס' : '—'}</span></div>
       ${past ? `<div data-act="view" data-v="review" data-rv="fixed"><span>מתוכן קבועות</span><b>${fmt(fxTot, 0)}</b><span>משכנתא, הו"ק וכד'</span></div>`
         : `<div data-act="view" data-v="review" data-rv="fixed"><span>עוד צפוי לרדת</span><b>${fmt(d.upc, 0)}</b><span>${upN ? `${upN === 1 ? 'חיוב קבוע אחד' : upN + ' חיובים קבועים'}` : 'הקבועות כבר ירדו'}</span></div>`}
-      <div><span>${past ? (d.bal >= 0 ? 'עודף' : 'חוסר') : (d.bal >= 0 ? 'יתרה צפויה' : 'חוסר צפוי')}</span><b class="${d.bal < 0 ? 'red' : ''}">${fmt(Math.abs(d.bal), 0)}</b><span>${d.incExp ? 'הכנסות פחות הוצאות' : 'אין הכנסות מוגדרות'}</span>${d.closed ? '' : monthLeft(S.month)}</div>
+      <div data-act="baldet"><span>${past ? (d.bal >= 0 ? 'עודף' : 'חוסר') : (d.bal >= 0 ? 'יתרה צפויה' : 'חוסר צפוי')}</span><b class="${d.bal < 0 ? 'red' : ''}">${fmt(Math.abs(d.bal), 0)}</b><span>${!d.incExp ? 'אין הכנסות מוגדרות' : !past && d.upc ? 'אחרי הקבועות שעוד ירדו' : 'הכנסות פחות הוצאות'}</span>${d.closed ? '' : monthLeft(S.month)}</div>
     </div>
     ${ti ? `<div class="panel">${ti}</div>` : ''}
     <div class="sec-title"><h2>לאן <span class="script blue">הלך</span> הכסף?</h2><div class="chip">${pTot ? (cur ? `עד ${today} ב${mName(pm)}: ${ils(pTot, 0)}` : `${mName(pm)}: ${ils(pTot, 0)}`) : ''}</div></div>
@@ -871,7 +879,7 @@ function rvGroup(g) {
 function multiNums() { return cached('multi', () => D.chat.filter(it => it.multi && !(D.ov[it.id] || {}).numOk).map(it => chatTx(it)).filter(t => t && !t.skipped && t.date >= D.cfg.start && !isClosed(t.month))); }
 // sections that fit this line: from keywords and from lines with shared words that already have a section, then the most used
 function quickCats(t) {
-  const wantInc = t.incoming && !isRefundText(t.text);
+  const wantInc = t.incoming && !rfIsIn(chatItem(t.id));
   const ok = c => c && !c.archived && (wantInc ? isIncome(c) : !isIncome(c));
   const idx = cached('wordIdx', () => {
     const w = new Map(), cnt = {};
@@ -937,9 +945,8 @@ function learnSkipSheet(it) {
   });
 }
 function recategorize() {
-  const inc = catByName('הכנסות נוספות');
   for (const it of D.chat) {
-    if (it.incoming) it.cat = !isRefundText(it.text) ? (suggestCat(it.desc, true) || (inc ? inc.id : '')) : (suggestCat(refundCore(it.desc), false) || '');
+    if (it.incoming) it.cat = inCat(it.text, it.desc);
     else it.cat = suggestCat(it.desc, false) || '';
     it.autoSkip = it.cat === SKIP; if (it.autoSkip) it.cat = '';
   }
@@ -1063,6 +1070,24 @@ function incDetailSheet() {
       ${blocks.length ? (closed ? `<div class="card" style="padding:2px 14px">${blocks.join('')}</div>` : blocks.join('')) : '<p class="note" style="text-align:center">אין הכנסות בחודש הזה</p>'}
       ${closed || !d.inc.some(t => t.src === 'income' && !t.ok) ? '' : '<p class="note" style="margin:8px 4px">הכנסה צפויה שעוד לא אושרה מסומנת "צפוי". לחיצה עליה – לאשר כמה נכנס בפועל.</p>'}
       <button class="ghost" data-act="income" style="margin-top:6px">הכנסות צפויות בכל חודש ⚙</button>`;
+  }, {live: true});
+}
+
+// how the balance on the home screen is made: income (also what is still expected) − what went out − fixed charges still to come
+function balSheet() {
+  openSheet(() => {
+    const m = S.month, d = dash(m), cur = m === curMonth(), future = m > curMonth(), past = !cur && !future;
+    const rfOpen = cur || future ? openRefunds().filter(t => t.month <= m).reduce((s, t) => s + Math.max(0, (t.refundAmt || t.amount) - (t.refundGot || 0)), 0) : 0;
+    const row = (label, v, sub, act) => `<button class="txline" ${act || ''} style="align-items:center"><div><b>${label}</b>${sub ? `<div class="d">${sub}</div>` : ''}</div><div class="a ${v > 0 ? 'green' : ''}">${v < 0 ? '− ' : v > 0 ? '+ ' : ''}${ils(Math.abs(v), 0)}</div></button>`;
+    const title = past ? (d.bal >= 0 ? 'עודף' : 'חוסר') : (d.bal >= 0 ? 'יתרה צפויה' : 'חוסר צפוי');
+    return `${head(`${title} – ${mName(m)}`)}
+      <div class="card" style="padding:4px 14px">
+        ${row('הכנסות', d.incExp, d.incIn < d.incExp ? `נכנס ${ils(d.incIn, 0)} · עוד צפוי ${ils(d.incExp - d.incIn, 0)}` : d.closed ? 'לפי האקסל' : 'הכל נכנס', 'data-act="incdet"')}
+        ${row(past ? 'הוצאות' : 'יצא עד היום', -d.spent, d.closed ? 'לפי האקסל' : past ? 'כולל הקבועות' : 'כולל קבועות שהיום שלהן כבר עבר', 'data-act="view" data-v="data"')}
+        ${past ? '' : row('קבועות שעוד צפויות לרדת', -d.upc, d.upc ? `${d.upcoming.length === 1 ? 'חיוב אחד' : d.upcoming.length + ' חיובים'} עד סוף החודש` : 'כל הקבועות כבר ירדו', 'data-act="view" data-v="review" data-rv="fixed"')}
+        <div class="txline" style="align-items:center;border-top:2px solid var(--line, #eee)"><div><b>= ${title}</b></div><div class="a ${d.bal < 0 ? 'red' : 'green'}">${d.bal < 0 ? '−' : ''} ${ils(Math.abs(d.bal), 0)}</div></div>
+      </div>
+      ${past ? '' : `<p class="note" style="margin:10px 4px;line-height:1.6">לא נכללות: הוצאות משתנות שעוד לא נכתבו בקבוצה (קניות, דלק וכד' בהמשך החודש)${d.md.pend ? `, ושורות בלי סעיף (${d.md.pend})` : ''}.${rfOpen ? ` החזרים שעוד מחכים (${ils(rfOpen, 0)}) לא נכללים – הם ייכנסו כשיגיעו.` : ''}</p>`}`;
   }, {live: true});
 }
 
@@ -1416,7 +1441,7 @@ function guideSheet() {
   const n1 = people()[0] || 'דני', n2 = people()[1] || n1;
   const ex = [[`350 שופרסל אשראי ${n1} כאל`, 'סכום ראשון, אחריו מה קנית, ובסוף איך שילמת'], [`55 פיצה אשראי ${n2} ישראכרט`, 'כרטיס = "אשראי" + שם + חברה. כרטיס חדש נקלט לבד'],
     ['120 דלק לרכב\n30 קפה תחנת דלק', 'כמה הוצאות בהודעה אחת – שורה לכל אחת'], [`89 השתלמות למשרד אשראי ${n1} כאל יתקבל החזר`, '"יתקבל החזר" / "צריך להתקבל החזר" / "קופה קטנה" – מסומן כמחכה להחזר'],
-    ['התקבל 85 החזר השתלמות', '"התקבל" = כסף שנכנס. עם "החזר" – מתחבר לבד להוצאה שחיכתה לו ויורד ממנה כמינוס (גם בכמה הודעות); בלי – הכנסה נוספת']];
+    ['התקבל 85 השתלמות', '"התקבל" = החזר: מתחבר לבד להוצאה שחיכתה לו ויורד ממנה כמינוס (גם בכמה הודעות). הכנסה – רק עם מילה של הכנסה, כמו "התקבל משכורת"']];
   openSheet(() => `${head('איך כותבים בקבוצה')}
     ${ex.map(([a, b]) => `<div class="card" style="margin-bottom:8px;padding:12px 14px"><div style="font-weight:700;white-space:pre-line">${esc(a)}</div><div class="note">${esc(b)}</div></div>`).join('')}
     <p class="note">מילה שלא מזוהה? בוחרים לה סעיף פעם אחת במסך "לבדיקה", והיא נלמדת. כדאי לנעוץ את ההודעה הזו בקבוצה:</p>
@@ -1560,7 +1585,7 @@ function confirmRestore(d, file) {
     <button class="primary" id="rs-go">לשחזר</button><button class="ghost" data-act="close">ביטול</button>`, {
     mount(sh) { sh.addEventListener('click', async ev => { if (!ev.target.closest('#rs-go')) return;
       if (D) { try { await IDB.put('snap', JSON.stringify({at: Date.now(), json: JSON.stringify(D)})); } catch {} }
-      D = d; migrate(); migrate3(); migrate4(); migrate5(); D.meta.dirty = false; save(false); stack.slice().forEach(e => closeSheet(e)); render(); toast('הנתונים שוחזרו', 4000);
+      D = d; migrate(); migrate3(); migrate4(); migrate5(); migrate6(); D.meta.dirty = false; save(false); stack.slice().forEach(e => closeSheet(e)); render(); toast('הנתונים שוחזרו', 4000);
       if (S.pendingShare) setTimeout(importPendingShare, 600);
     }); }
   });
@@ -1688,6 +1713,7 @@ const ACT = {
   settings: () => settingsSheet(),
   income: () => incomeSheet(),
   incdet: () => incDetailSheet(),
+  baldet: () => balSheet(),
   cats: () => catsSheet(),
   budgets: () => incomeSheet(),
   grp: el => groupSheet(el.dataset.id),
@@ -1763,7 +1789,7 @@ window.addEventListener('popstate', () => {
   setTimeout(() => { if (!guardActive) pushGuard(); }, 2200);
 });
 /* =============== installed app: share target + updates =============== */
-const APP_VERSION = '2.3';
+const APP_VERSION = '2.4';
 async function importPendingShare() {
   let c; try { c = await caches.open('shared'); } catch { return; }
   const fr = await c.match('./shared-file'), ir = await c.match('./shared-info');
@@ -1985,7 +2011,7 @@ document.addEventListener('visibilitychange', () => { if (document.hidden) shiel
 addEventListener('pointerdown', shieldOff, true);   // safety net: touching the screen always brings the app back
 (async () => {
   D = await loadStore();
-  migrate(); migrate3(); migrate4(); migrate5();
+  migrate(); migrate3(); migrate4(); migrate5(); migrate6();
   if (D) lastJSON = JSON.stringify(D);
   const sharedNow = new URLSearchParams(location.search).has('shared');
   if (sharedNow) history.replaceState(null, '', location.pathname);
