@@ -1702,7 +1702,12 @@ const ACT = {
   'rf-done': el => { const id = el.dataset.id, st = rfState(id), v = !st.done; setOv(id, {refundDone: v === st.auto ? null : v}); },
   'rf-link': el => { setOv(el.dataset.id, {rfOf: el.dataset.e, cat: null}); toast('ההחזר חובר להוצאה'); },
   'rf-inc': el => { setOv(el.dataset.id, {rfOf: 'none', cat: el.dataset.c}); toast(`← ${catById(el.dataset.c).name}`); },
-  'rf-none': el => { setOv(el.dataset.id, {rfOf: 'none'}); toast('ההחזר לא מחובר להוצאה – אפשר לבחור לו סעיף'); },
+  // not a refund of this expense: choose right away from every section (income too); nothing changes until one is chosen
+  'rf-none': el => { const id = el.dataset.id, t = findTx(id);
+    pickCat('לאיזה סעיף?', null, t && t.rfOf ? '' : (t && t.cat) || '', c => {
+      if (c === SKIP) { setOv(id, {rfOf: 'none', skip: true}); toast('השורה לא תיספר'); return; }
+      setOv(id, {rfOf: 'none', cat: c}); toast(`← ${catById(c).name}`);
+    }, true); },
   'rf-pick': el => { const id = el.dataset.id; openSheet(() => `${head('לאיזו הוצאה שייך ההחזר?')}<div class="actlist">${rfChoices(id).map(e => `<button data-e="${esc(e)}">${esc(rfLabel(e))} <span>↩︎</span></button>`).join('')}</div>`,
     {mount(sh) { sh.addEventListener('click', ev => { const b = ev.target.closest('[data-e]'); if (b) { closeSheet(); setOv(id, {rfOf: b.dataset.e, cat: null}); toast('ההחזר חובר להוצאה'); } }); }}); },
   'rv-cat': el => setChatCat(el.dataset.id, el.dataset.c),
@@ -1801,7 +1806,7 @@ window.addEventListener('popstate', () => {
   setTimeout(() => { if (!guardActive) pushGuard(); }, 2200);
 });
 /* =============== installed app: share target + updates =============== */
-const APP_VERSION = '2.6';
+const APP_VERSION = '2.7';
 async function importPendingShare() {
   let c; try { c = await caches.open('shared'); } catch { return; }
   const fr = await c.match('./shared-file'), ir = await c.match('./shared-info');
