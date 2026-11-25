@@ -726,7 +726,7 @@ function viewHome() {
       <div data-act="incdet"><span>הכנסות</span><b>${fmt(d.incExp, 0)}</b><span>${d.incIn < d.incExp ? `נכנס ${fmt(d.incIn, 0)}` : d.incExp ? 'הכל נכנס' : '—'}</span></div>
       ${past ? `<div data-act="view" data-v="review" data-rv="fixed"><span>מתוכן קבועות</span><b>${fmt(fxTot, 0)}</b><span>משכנתא, הו"ק וכד'</span></div>`
         : `<div data-act="view" data-v="review" data-rv="fixed"><span>עוד צפוי לרדת</span><b>${fmt(d.upc, 0)}</b><span>${upN ? `${upN === 1 ? 'חיוב קבוע אחד' : upN + ' חיובים קבועים'}` : 'הקבועות כבר ירדו'}</span></div>`}
-      <div data-act="baldet"><span>${past ? (d.bal >= 0 ? 'עודף' : 'חוסר') : (d.bal >= 0 ? 'יתרה צפויה' : 'חוסר צפוי')}</span><b class="${d.bal < 0 ? 'red' : ''}">${fmt(Math.abs(d.bal), 0)}</b><span>${!d.incExp ? 'אין הכנסות מוגדרות' : !past && d.upc ? 'אחרי הקבועות שעוד ירדו' : 'הכנסות פחות הוצאות'}</span>${d.closed ? '' : monthLeft(S.month)}</div>
+      <div data-act="baldet"><span>${past ? (d.bal >= 0 ? 'עודף' : 'חוסר') : (d.bal >= 0 ? 'יתרה צפויה' : 'חוסר צפוי')}</span><b class="${d.bal < 0 ? 'red' : ''}">${fmt(Math.abs(d.bal), 0)}</b><span>${!d.incExp ? 'אין הכנסות מוגדרות' : !past && d.upc ? 'כולל ההוצאות הקבועות שצפויות לרדת בהמשך' : 'הכנסות פחות הוצאות'}</span>${d.closed ? '' : monthLeft(S.month)}</div>
     </div>
     ${ti ? `<div class="panel">${ti}</div>` : ''}
     <div class="sec-title"><h2>לאן <span class="script blue">הלך</span> הכסף?</h2><div class="chip">${pTot ? (cur ? `עד ${today} ב${mName(pm)}: ${ils(pTot, 0)}` : `${mName(pm)}: ${ils(pTot, 0)}`) : ''}</div></div>
@@ -1789,7 +1789,7 @@ window.addEventListener('popstate', () => {
   setTimeout(() => { if (!guardActive) pushGuard(); }, 2200);
 });
 /* =============== installed app: share target + updates =============== */
-const APP_VERSION = '2.4';
+const APP_VERSION = '2.5';
 async function importPendingShare() {
   let c; try { c = await caches.open('shared'); } catch { return; }
   const fr = await c.match('./shared-file'), ir = await c.match('./shared-info');
