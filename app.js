@@ -223,7 +223,7 @@ const rfAmtOf = it => { const o = D.ov[it.id] || {}; return o.amount != null ? o
 const rfWant = it => { const o = D.ov[it.id] || {}; return it.refundAmt && it.refundAmt !== it.amount ? it.refundAmt : rfAmtOf(it); };
 function refundLinks() { return cached('rfl', refundLinks_); }
 function refundLinks_() {
-  const of = {}, ask = {}, got = {}, list = {}, want = {}, byId = {}, pre = {};
+  const of = {}, ask = {}, got = {}, list = {}, want = {}, byId = {}, pre = {}, amt = {};
   const open = [], ids = new Set(D.chat.map(i => i.id));
   const preItems = (D.rfPre || []).filter(p => p.date < D.cfg.start && !ids.has(p.id));
   for (const p of preItems) pre[p.id] = true;
@@ -237,28 +237,29 @@ function refundLinks_() {
       continue;
     }
     if (!rfIsIn(it)) continue;
-    const o = D.ov[it.id] || {}, a = rfAmtOf(it);
+    const o = D.ov[it.id] || {}, noAmt = !!it.noAmt && o.amount == null, a = noAmt ? null : rfAmtOf(it);
     if (o.rfOf === 'none') continue;
     let e = null;
     if (o.rfOf) e = open.find(x => x.it.id === o.rfOf) || null;
     else {
       const age = x => (Date.parse(it.date) - Date.parse(x.it.date)) / 864e5;
-      const cands = open.filter(x => !closed(x) && x.it.date <= it.date && age(x) <= 365 && a <= rem(x) * 1.15 + 10);
-      if (!cands.length) continue;
+      const cands = open.filter(x => !closed(x) && x.it.date <= it.date && age(x) <= 365 && (noAmt || a <= rem(x) * 1.15 + 10));
+      if (!cands.length) { if (noAmt) ask[it.id] = []; continue; }      // no amount and nothing waits: asked, never guessed
       const rw = rfWords(it.desc), shared = x => [...x.words].some(w => rw.has(w));
-      const close = x => Math.abs(rem(x) - a) <= Math.max(10, rem(x) * 0.05);
+      const close = x => !noAmt && Math.abs(rem(x) - a) <= Math.max(10, rem(x) * 0.05);
       const W = cands.filter(shared), pool = W.length ? W : cands, C = pool.filter(close);
       if (W.length === 1) e = W[0];
       else if (C.length === 1) e = C[0];
+      else if (noAmt && !W.length && cands.length === 1) e = cands[0];
       else {
         ask[it.id] = pool.map(x => ({x, s: (shared(x) ? 2 : 0) + (close(x) ? 1 : 0)}))
-          .sort((p, q) => q.s - p.s || Math.abs(rem(p.x) - a) - Math.abs(rem(q.x) - a) || tKey(q.x.it).localeCompare(tKey(p.x.it))).slice(0, 4).map(p => p.x.it.id);
+          .sort((p, q) => q.s - p.s || (a == null ? 0 : Math.abs(rem(p.x) - a) - Math.abs(rem(q.x) - a)) || tKey(q.x.it).localeCompare(tKey(p.x.it))).slice(0, 4).map(p => p.x.it.id);
         continue;
       }
     }
-    if (e) { of[it.id] = e.it.id; got[e.it.id] += a; list[e.it.id].push(it.id); }
+    if (e) { const v = a == null ? Math.max(0, rem(e)) : a; of[it.id] = e.it.id; amt[it.id] = v; got[e.it.id] += v; list[e.it.id].push(it.id); }
   }
-  return {of, ask, got, list, want, byId, pre};
+  return {of, ask, got, list, want, byId, pre, amt};
 }
 // state of an expense that waits for a refund
 function rfState(id) {
@@ -292,12 +293,12 @@ function chatTx(it, withSkipped) {
     }
   }
   const c = catById(cat);
-  const raw = o.amount != null ? o.amount : it.amount;
+  const raw = o.amount != null ? o.amount : it.noAmt ? ((it.incoming && refundLinks().amt[it.id]) || 0) : it.amount;
   const amt = it.incoming && !isIncome(c) ? -raw : raw;
   const rs = it.refundExp && !it.incoming ? rfState(it.id) : null;
   return {id: it.id, src: 'chat', date: it.date, time: it.time, month: it.date.slice(0, 7), amount: amt, cat: c ? cat : '', desc, text: it.text,
     pay: o.pay || it.pay, person: it.person, note: o.note || '', refundExp: !!rs, refundAmt: rs ? rs.want : 0, refundDone: rs ? rs.done : false, refundGot: rs ? rs.got : 0,
-    rfOf, rfAsk, rfPre, preBudget: it.date < D.cfg.start, pending: !c, incoming: it.incoming, skipped: skip, autoSkip: !!it.autoSkip};
+    rfOf, rfAsk, rfPre, noAmt: !!it.noAmt && o.amount == null && !rfOf, preBudget: it.date < D.cfg.start, pending: !c, incoming: it.incoming, skipped: skip, autoSkip: !!it.autoSkip};
 }
 function fixedActive(f, m) {
   if (f.from && m < f.from) return false;
@@ -369,7 +370,7 @@ const reviewMonths = () => [addM(curMonth(), -1), curMonth()].filter(m => m >= m
 function dupPairs() { return cached('dup', () => dupPairs_()); }
 function dupPairs_() {
   const by = {}, out = [];
-  for (const it of D.chat) { const t = chatTx(it); if (!t || isClosed(t.month) || t.date < D.cfg.start) continue; const k = t.date + '|' + Math.abs(t.amount); (by[k] = by[k] || []).push(t); }
+  for (const it of D.chat) { const t = chatTx(it); if (!t || isClosed(t.month) || t.date < D.cfg.start) continue; if (!t.amount) continue; const k = t.date + '|' + Math.abs(t.amount); (by[k] = by[k] || []).push(t); }
   for (const k in by) { const g = by[k]; for (let i = 0; i < g.length; i++) for (let j = i + 1; j < g.length; j++) {
     const a = g[i], b = g[j]; if ((D.ov[a.id] || {}).notDup || (D.ov[b.id] || {}).notDup) continue;
     if (!!a.incoming !== !!b.incoming) continue;      // an expense and its refund on the same day are not a double entry
@@ -420,6 +421,8 @@ const CREDIT_W = /(?<![\u0590-\u05FF])[וה]?(זיכוי|זיכויים|זיכו
 // an expense that waits for money back: "צריך להתקבל החזר", "יתקבל החזר", "מגיע החזר", "יוחזר", "קופה קטנה"…
 const REFUND_EXP = /(יתקבל|להתקבל|לקבל|נקבל|צפוי|מגיע)\s*(ה)?(החזר|זיכוי)|(?<![֐-׿])(יוחזר|יוחזרו|יחזירו|יזוכה)(?![֐-׿])|החזר\s*(דרך\s*)?קופה קטנה|קופה קטנה/;
 // money back that arrived: "התקבל 445 החזר", "קיבלנו החזר 445", "445 התקבל החזר"
+// money in with no amount at all: only "התקבל…" (a reply in the group); the amount comes from the expense it belongs to
+const NOAMT_IN = /^(התקבל|התקבלה|התקבלו)(?![\u0590-\u05FF])/;
 const IN_VERB = /^(התקבל|התקבלו|קיבלנו|קיבלתי|קיבלה|קיבל|נכנס|נכנסו|הגיע|הגיעו)(?![֐-׿])/;
 const isRefundText = t => /החזר/.test(t) || CREDIT_W.test(t);
 const refundCore = d => String(d || '').replace(/^החזר\s*/, '').replace(new RegExp(CREDIT_W.source, 'g'), ' ').replace(/ {2,}/g, ' ').trim();
@@ -505,9 +508,13 @@ function parseChat(text) {
     if (!cur) continue;
     msg = msg.replace(EDITED, '').trim();
     if (!msg || NOAMOUNT_SYS.test(msg)) continue;
-    const n = firstNumber(msg);
-    if (!n || !(n.value > 0)) continue;
-    const multi = (msg.match(/\d+(?:[.,]\d+)*/g) || []).length > 1;      // "2 פיצות 90": the first number may not be the amount
+    let n = firstNumber(msg), noAmt = false;
+    if (!n || !(n.value > 0)) {
+      // "התקבל", "התקבל ונמשך לבנק" with no amount – usually a reply to the message of an expense that waits for a refund
+      if (!NOAMT_IN.test(msg)) continue;
+      noAmt = true; n = {value: 0, index: 0, len: 0};
+    }
+    const multi = !noAmt && (msg.match(/\d+(?:[.,]\d+)*/g) || []).length > 1;      // "2 פיצות 90": the first number may not be the amount
     const person = senderToPerson(cur.sender), pd = detectPay(msg, person, addedPays);
     let desc = ' ' + msg.slice(0, n.index) + msg.slice(n.index + n.len) + ' ';
     if (pd.phrase) desc = desc.split(pd.phrase).join(' ');
@@ -527,7 +534,7 @@ function parseChat(text) {
     const base = `${cur.date}T${cur.time}|${n.value}|${hash8(normMsg(msg))}`;
     seen[base] = (seen[base] || 0) + 1;
     items.push({id: base + '#' + seen[base], date: cur.date, time: cur.time, sender: cur.sender, person, text: msg, desc, amount: n.value, incoming, cat,
-      pay: pd.pay, autoSkip, refundExp, multi, refundAmt: ra ? +ra : (refundExp ? n.value : 0)});
+      pay: pd.pay, autoSkip, refundExp, multi, refundAmt: ra ? +ra : (refundExp ? n.value : 0), ...(noAmt ? {noAmt: true} : {})});
   }
   // expenses from the year before the budget start that wait for a refund are kept aside (not counted anywhere),
   // only so that a refund arriving after the start still comes off that expense's section
@@ -816,11 +823,13 @@ function viewReview() {
     ${dp.length ? `<div class="label">אולי נרשם פעמיים? (${dp.length})</div>${dp.map(([a, b]) => `<div class="card rv"><div class="meta"><span>${dShort(a.date)}</span><span class="amt">${ils(Math.abs(a.amount))}</span></div>
         <div class="t">• ${esc(a.person)}: ${esc(a.text)}<br>• ${esc(b.person)}: ${esc(b.text)}</div>
         <div class="chips"><button data-act="dup-skip" data-id="${esc(b.id)}">זה כפול – לספור פעם אחת</button><button data-act="dup-ok" data-a="${esc(a.id)}" data-b="${esc(b.id)}" style="color:var(--muted)">שתי הוצאות שונות</button></div></div>`).join('')}` : ''}
-    ${ra.length ? `<div class="label">על איזו הוצאה ההחזר? (${ra.length})</div>${ra.map(t => `<div class="card rv"><div class="meta"><span>${dShort(t.date)} ${t.time || ''} · ${esc(t.person || '')}${closedTag(t)}</span><span class="amt green">+${ils(Math.abs(t.amount))}</span></div>
+    ${ra.length ? `<div class="label">על איזו הוצאה ההחזר? (${ra.length})</div>${ra.map(t => `<div class="card rv"><div class="meta"><span>${dShort(t.date)} ${t.time || ''} · ${esc(t.person || '')}${closedTag(t)}</span><span class="amt green">${t.noAmt ? 'בלי סכום' : '+' + ils(Math.abs(t.amount))}</span></div>
         <div class="t">${esc(t.text)}</div>
+        ${!t.rfAsk.length ? `<p class="note" style="margin:4px 0">${t.noAmt ? 'אין סכום בהודעה, ולא נמצאה הוצאה שמחכה להחזר – בחרו סעיף, ואז כמה התקבל.' : 'לא נמצאה הוצאה שמחכה להחזר.'}</p>` : t.noAmt ? '<p class="note" style="margin:4px 0">אין סכום בהודעה – הסכום יהיה מה שההוצאה עוד מחכה לו (אפשר לתקן אחר כך).</p>' : ''}
         <div class="chips">${t.rfAsk.map(e => `<button data-act="rf-link" data-id="${esc(t.id)}" data-e="${esc(e)}">${esc(rfLabel(e))}</button>`).join('')}
           ${incCats().map(c => `<button data-act="rf-inc" data-id="${esc(t.id)}" data-c="${esc(c.id)}" class="incchip">+ ${esc(c.name)}</button>`).join('')}
-          <button data-act="rf-none" data-id="${esc(t.id)}" style="color:var(--muted)">לא קשור להוצאה – לבחור סעיף</button></div></div>`).join('')}` : ''}
+          <button data-act="rf-none" data-id="${esc(t.id)}" style="color:var(--muted)">${t.rfAsk.length ? 'לא קשור להוצאה – ' : ''}לבחור סעיף</button>
+          ${t.noAmt ? `<button data-act="rf-skip" data-id="${esc(t.id)}" style="color:var(--muted)">להתעלם (לא כסף)</button>` : ''}</div></div>`).join('')}` : ''}
     ${pc.length ? `<div class="label">לבחור סעיף (${pc.length}${pendGroups().length < pc.length ? ` שורות ב-${pendGroups().length} קבוצות` : ''})</div>${pendGroups().map(rvGroup).join('')}` : ''}
     ${of.length ? `<div class="label">קבועות והכנסות לאישור – כמה ירד / נכנס בפועל?</div><div class="card">${of.map(f => `<div class="txline" style="align-items:center"><div><div class="a">${ils(f.amount)}</div><div class="d">${esc(f.desc)} · ${esc(catById(f.cat)?.name || '')} · ${dShort(f.date)}</div></div>
         <div style="display:flex;gap:6px"><button class="smallbtn" data-act="fx-ok" data-k="${esc(f.key)}">ירד ✓</button><button class="smallbtn" data-act="tx" data-id="${esc(f.id)}">סכום אחר</button></div></div>`).join('')}</div>` : ''}
@@ -1466,7 +1475,7 @@ function guideSheet() {
   const n1 = people()[0] || 'דני', n2 = people()[1] || n1;
   const ex = [[`350 שופרסל אשראי ${n1} כאל`, 'סכום ראשון, אחריו מה קנית, ובסוף איך שילמת'], [`55 פיצה אשראי ${n2} ישראכרט`, 'כרטיס = "אשראי" + שם + חברה. כרטיס חדש נקלט לבד'],
     ['120 דלק לרכב\n30 קפה תחנת דלק', 'כמה הוצאות בהודעה אחת – שורה לכל אחת'], [`89 השתלמות למשרד אשראי ${n1} כאל יתקבל החזר`, '"יתקבל החזר" / "צריך להתקבל החזר" / "קופה קטנה" – מסומן כמחכה להחזר'],
-    ['התקבל 85 השתלמות', '"התקבל" = החזר: מתחבר לבד להוצאה שחיכתה לו ויורד ממנה כמינוס (גם בכמה הודעות). הכנסה – רק עם מילה של הכנסה, כמו "התקבל משכורת"']];
+    ['התקבל (גם בלי סכום, בתגובה להודעה)', 'בלי סכום – מתחבר להוצאה שמחכה להחזר, בסכום שהיא מחכה לו. אם לא ברור לאיזו – שאלה אחת ב"לבדיקה"'], ['התקבל 85 השתלמות', '"התקבל" = החזר: מתחבר לבד להוצאה שחיכתה לו ויורד ממנה כמינוס (גם בכמה הודעות). הכנסה – רק עם מילה של הכנסה, כמו "התקבל משכורת"']];
   openSheet(() => `${head('איך כותבים בקבוצה')}
     ${ex.map(([a, b]) => `<div class="card" style="margin-bottom:8px;padding:12px 14px"><div style="font-weight:700;white-space:pre-line">${esc(a)}</div><div class="note">${esc(b)}</div></div>`).join('')}
     <p class="note">מילה שלא מזוהה? בוחרים לה סעיף פעם אחת במסך "לבדיקה", והיא נלמדת. כדאי לנעוץ את ההודעה הזו בקבוצה:</p>
@@ -1646,7 +1655,7 @@ async function doExport(from, to, inclOpen) {
   const flat = [['מזהה', 'תאריך', 'גיליון', 'סעיף', 'קבוצה', 'סכום', 'תיאור', 'הודעה מקורית', 'אמצעי תשלום', 'מי', 'מקור', 'הערה', 'צפוי החזר']];
   let pendSkipped = 0, overflow = [];
   for (const m of months) {
-    const list = monthTx(m).filter(t => { if (t.pending) { pendSkipped++; return false; } return (t.src !== 'fixed' && t.src !== 'income') || t.ok || inclOpen; }).sort((a, b) => a.date.localeCompare(b.date));
+    const list = monthTx(m).filter(t => { if (t.pending) { pendSkipped++; return false; } if (t.src === 'chat' && !t.amount) return false; return (t.src !== 'fixed' && t.src !== 'income') || t.ok || inclOpen; }).sort((a, b) => a.date.localeCompare(b.date));
     const [y, mo] = m.split('-').map(Number);
     const aoa = [[`${HEB_M[mo - 1]} ${y}`], [], [''], ['סעיף']];
     cols.forEach((c, i) => { aoa[2][i + 1] = (i === 0 || cols[i - 1].group !== c.group) ? groupById(c.group).name : ''; aoa[3][i + 1] = c.name; });
@@ -1715,12 +1724,14 @@ const ACT = {
   't-skip': el => { const t = findTx(el.dataset.id); if (t.skipped) { setOv(el.dataset.id, {skip: t.autoSkip ? false : null}); toast('השורה הוחזרה'); } else { setOv(el.dataset.id, {skip: true}); closeSheet(); toast('השורה לא תיספר'); } },
   'rf-done': el => { const id = el.dataset.id, st = rfState(id), v = !st.done; setOv(id, {refundDone: v === st.auto ? null : v}); },
   'rf-link': el => { setOv(el.dataset.id, {rfOf: el.dataset.e, cat: null}); toast('ההחזר חובר להוצאה'); },
-  'rf-inc': el => { setOv(el.dataset.id, {rfOf: 'none', cat: el.dataset.c}); toast(`← ${catById(el.dataset.c).name}`); },
+  'rf-inc': el => { const id = el.dataset.id, na = (findTx(id) || {}).noAmt; setOv(id, {rfOf: 'none', cat: el.dataset.c}); toast(`← ${catById(el.dataset.c).name}`); if (na) askAmount('כמה התקבל?', '', v => setOv(id, {amount: v})); },
+  'rf-skip': el => { setOv(el.dataset.id, {skip: true, rfOf: 'none'}); toast('השורה לא תיספר'); },
   // not a refund of this expense: choose right away from every section (income too); nothing changes until one is chosen
   'rf-none': el => { const id = el.dataset.id, t = findTx(id);
     pickCat('לאיזה סעיף?', null, t && t.rfOf ? '' : (t && t.cat) || '', c => {
       if (c === SKIP) { setOv(id, {rfOf: 'none', skip: true}); toast('השורה לא תיספר'); return; }
       setOv(id, {rfOf: 'none', cat: c}); toast(`← ${catById(c).name}`);
+      if (t && t.noAmt) askAmount('כמה התקבל?', '', v => setOv(id, {amount: v}));
     }, true); },
   'rf-pick': el => { const id = el.dataset.id; openSheet(() => `${head('לאיזו הוצאה שייך ההחזר?')}<div class="actlist">${rfChoices(id).map(e => `<button data-e="${esc(e)}">${esc(rfLabel(e))} <span>↩︎</span></button>`).join('')}</div>`,
     {mount(sh) { sh.addEventListener('click', ev => { const b = ev.target.closest('[data-e]'); if (b) { closeSheet(); setOv(id, {rfOf: b.dataset.e, cat: null}); toast('ההחזר חובר להוצאה'); } }); }}); },
@@ -1828,7 +1839,7 @@ window.addEventListener('popstate', () => {
   setTimeout(() => { if (!guardActive) pushGuard(); }, 2200);
 });
 /* =============== installed app: share target + updates =============== */
-const APP_VERSION = '3.0';
+const APP_VERSION = '3.1';
 async function importPendingShare() {
   let c; try { c = await caches.open('shared'); } catch { return; }
   const fr = await c.match('./shared-file'), ir = await c.match('./shared-info');

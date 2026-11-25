@@ -257,6 +257,30 @@ def main():
         check('…and once it has a section it goes out in the Excel export of that month', ex == [['סופר', -500]], ex)
         ev("() => { delete D.closed['2026-12']; const id = D.chat.find(i => /500 מתנה/.test(i.text)).id; delete D.ov[id]; D.kw = D.kw.filter(([k]) => k !== 'מתנה'); recategorize(); save(false); }")
 
+        print('"התקבל" with no amount (a reply in the group)')
+        na0 = ev("() => { const L = refundLinks(); return Object.keys(L.byId).filter(id => !rfState(id).done); }")
+        imp("\n".join([
+            "20/12/2026, 10:00 - שי: התקבל",
+            "03/01/2027, 10:00 - שי: 400 שח עבור לוחות שנה, צריך להתקבל החזר של 375",
+            "10/01/2027, 10:00 - שיראל: התקבל ונמשך לבנק",
+            "11/01/2027, 10:00 - שי: התקבל",
+        ]))
+        ev("() => { const e = D.chat.find(i => /לוחות שנה/.test(i.text)); D.ov[e.id] = {cat: 'c3'}; save(false); }")
+        first = ev("() => { const t = chatTx(D.chat.find(i => i.text === 'התקבל ונמשך לבנק')); return t.rfAsk ? t.rfAsk[0] : 'linked'; }")
+        check('with several expenses waiting it asks, newest first', first == ev("() => D.chat.find(i => /לוחות שנה/.test(i.text)).id"), first)
+        ev("ids => { for (const id of ids) D.ov[id] = {...(D.ov[id] || {}), skip: true}; save(false); }", na0)
+        na = ev("() => D.chat.filter(i => /^התקבל/.test(i.text)).map(i => { const t = chatTx(i); return {text: i.text, amount: t.amount, cat: t.cat, rfOf: !!t.rfOf, ask: t.rfAsk}; })")
+        na = [x for x in na if x['text'] in ('התקבל ונמשך לבנק', 'התקבל')]
+        check('"התקבל" lines without an amount are read, not dropped', len(na) == 3, na)
+        nb = [x for x in na if x['text'] == 'התקבל ונמשך לבנק']
+        check('…tied to the expense that waits, for the amount it waits for (375), as a minus in its section', nb and nb[0]['rfOf'] and nb[0]['amount'] == -375 and nb[0]['cat'] == 'c3', nb)
+        check('…and the expense is closed', ev("() => chatTx(D.chat.find(i => /לוחות שנה/.test(i.text))).refundDone"))
+        check('no amount and nothing waiting: asked in review, not guessed', any(x['text'] == 'התקבל' and x['ask'] == [] for x in na) and ev("rfAsks().some(t => t.noAmt)"), na)
+        check('two "התקבל" without amount are not called a double entry', ev("dupPairs().every(([a, b]) => !/^התקבל$/.test(a.text) || !/^התקבל/.test(b.text))"))
+        ev("() => D.chat.filter(i => i.text === 'התקבל').forEach(i => ACT['rf-skip']({dataset: {id: i.id}}))")
+        check('"להתעלם" removes it from review', not ev("rfAsks().some(t => t.noAmt)"))
+        ev("ids => { for (const id of ids) { delete D.ov[id].skip; } save(false); }", na0)
+
         print('home squares')
         ev("S.month = '2026-11'; ACT.view({dataset: {v: 'home'}})")
         pg.locator('[data-act=incdet]').click(); pg.wait_for_timeout(300)
