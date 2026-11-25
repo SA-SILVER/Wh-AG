@@ -238,6 +238,13 @@ def main():
         ev("() => { const id = D.chat.find(i => /500 מתנה/.test(i.text)).id; D.ov[id] = {cat: 'c23'}; save(false); }")
         check('income chosen by hand is kept', g('500 מתנה')['cat'] == 'c23' and g('500 מתנה')['amount'] == 500)
 
+        print('income detail of a closed month')
+        ev("() => { D.closed = D.closed || {}; D.closed['2026-11'] = {c2: 14000, c23: 2500}; save(false); S.month = '2026-11'; }")
+        ev("incDetailSheet()"); pg.wait_for_timeout(300)
+        it = pg.locator('.sheet').last.inner_text()
+        check('closed month: each income section shows the lines it is made of', 'הכנסות נוספות' in it and 'התקבל משכורת' in it and 'אין פירוט באפליקציה' in it, it[:400])
+        ev("stack.slice().forEach(e => closeSheet(e)); delete D.closed['2026-11']; save(false);"); pg.wait_for_timeout(250)
+
         print('home squares')
         ev("S.month = '2026-11'; ACT.view({dataset: {v: 'home'}})")
         pg.locator('[data-act=incdet]').click(); pg.wait_for_timeout(300)

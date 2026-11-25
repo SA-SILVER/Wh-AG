@@ -1071,14 +1071,22 @@ function incDetailSheet() {
   openSheet(() => {
     const m = S.month, d = dash(m), md = d.md, closed = md.closed;
     const ic = cats().filter(isIncome);
+    // a closed month: the amount of every section is Excel's; under it – the lines recorded in the app that make it up,
+    // and what is only in Excel (or only in the app) as a difference line
+    const lines = c => md.list.filter(t => !t.pending && t.cat === c.id && (t.src !== 'income' || t.ok));
     const blocks = closed
-      ? ic.filter(c => md.byCat[c.id]).map(c => `<button class="txline" data-act="cat" data-id="${esc(c.id)}"><div><div class="a green">${ils(md.byCat[c.id])}</div><div class="d">${esc(c.name)}</div></div><div class="r"><span style="color:var(--green)">בפועל ✓</span></div></button>`)
+      ? ic.filter(c => md.byCat[c.id] || lines(c).length).map(c => ({c, tot: md.byCat[c.id] || 0, items: lines(c)})).sort((a, b) => b.tot - a.tot)
+          .map(b => { const df = b.tot - sumA(b.items);
+            return `<div class="card fxg"><div class="fxg-h"><b>${esc(b.c.name)}</b><span>${ils(b.tot, 0)}</span></div>
+              ${b.items.map(t => txLine(t)).join('')}
+              ${Math.abs(df) >= 1 ? `<div class="txline" style="align-items:center"><div><div class="a">${df < 0 ? '−' : ''}${ils(Math.abs(df))}</div><div class="d">${b.items.length ? (df > 0 ? 'נרשם רק באקסל – לא באפליקציה' : 'נרשם באפליקציה ולא נכלל באקסל') : 'אין פירוט באפליקציה – הסכום מהאקסל'}</div></div><div class="r"><span class="tag">אקסל</span></div></div>` : ''}</div>`; })
       : ic.map(c => ({c, items: d.inc.filter(t => t.cat === c.id)})).filter(b => b.items.length).sort((a, b) => sumA(b.items) - sumA(a.items))
           .map(b => `<div class="card fxg"><div class="fxg-h"><b>${esc(b.c.name)}</b><span>${ils(sumA(b.items), 0)}</span></div>${b.items.map(t => txLine(t)).join('')}</div>`);
     const left = d.incExp - d.incIn;
     return `${head(`הכנסות – ${mName(m)}${closed ? ' · לפי האקסל' : ''}`)}
       <div class="card" style="padding:10px 14px;margin-bottom:10px;display:flex;justify-content:space-between;font-size:13.5px"><span>${closed ? 'נכנס בפועל' : 'נכנס עד היום'} <b>${ils(d.incIn, 0)}</b></span>${!closed && left > 0 ? `<span>עוד צפוי <b>${ils(left, 0)}</b></span><span style="color:var(--muted)">סה"כ ${ils(d.incExp, 0)}</span>` : ''}</div>
-      ${blocks.length ? (closed ? `<div class="card" style="padding:2px 14px">${blocks.join('')}</div>` : blocks.join('')) : '<p class="note" style="text-align:center">אין הכנסות בחודש הזה</p>'}
+      ${closed && blocks.length ? '<p class="note" style="margin:0 4px 8px">החודש נסגר באקסל: הסכום של כל סעיף מדויק לפי האקסל, ומתחתיו מה שנרשם באפליקציה.</p>' : ''}
+      ${blocks.length ? blocks.join('') : '<p class="note" style="text-align:center">אין הכנסות בחודש הזה</p>'}
       ${closed || !d.inc.some(t => t.src === 'income' && !t.ok) ? '' : '<p class="note" style="margin:8px 4px">הכנסה צפויה שעוד לא אושרה מסומנת "צפוי". לחיצה עליה – לאשר כמה נכנס בפועל.</p>'}
       <button class="ghost" data-act="income" style="margin-top:6px">הכנסות צפויות בכל חודש ⚙</button>`;
   }, {live: true, month: true});
@@ -1814,7 +1822,7 @@ window.addEventListener('popstate', () => {
   setTimeout(() => { if (!guardActive) pushGuard(); }, 2200);
 });
 /* =============== installed app: share target + updates =============== */
-const APP_VERSION = '2.8';
+const APP_VERSION = '2.9';
 async function importPendingShare() {
   let c; try { c = await caches.open('shared'); } catch { return; }
   const fr = await c.match('./shared-file'), ir = await c.match('./shared-info');
