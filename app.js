@@ -359,8 +359,12 @@ function monthData_(m) {
 }
 function pendingChat() { return cached('pend', () => pendingChat_()); }
 // a refund tied to an expense follows that expense's section, and one that waits for "which expense?" is asked separately
-function pendingChat_() { return D.chat.map(it => chatTx(it)).filter(t => t && t.pending && (!t.rfOf || t.rfPre) && !t.rfAsk && t.date >= D.cfg.start && !isClosed(t.month)).sort((a, b) => a.date.localeCompare(b.date)); }
-function rfAsks() { return cached('rfask', () => D.chat.map(it => chatTx(it)).filter(t => t && t.rfAsk && t.date >= D.cfg.start && !isClosed(t.month)).sort((a, b) => a.date.localeCompare(b.date))); }
+// money that came in in a month already closed in Excel is asked about too: the refund rule changed those lines after the month was closed,
+// and a line without a section is not exported – so Excel would never hear about it
+const rvMonthOk = t => !isClosed(t.month) || t.incoming;
+function pendingChat_() { return D.chat.map(it => chatTx(it)).filter(t => t && t.pending && (!t.rfOf || t.rfPre) && !t.rfAsk && t.date >= D.cfg.start && rvMonthOk(t)).sort((a, b) => a.date.localeCompare(b.date)); }
+function rfAsks() { return cached('rfask', () => D.chat.map(it => chatTx(it)).filter(t => t && t.rfAsk && t.date >= D.cfg.start && rvMonthOk(t)).sort((a, b) => a.date.localeCompare(b.date))); }
+const closedTag = t => isClosed(t.month) ? ` · <b style="color:var(--pink)">חודש סגור ${sheetName(t.month)}</b>` : '';
 const reviewMonths = () => [addM(curMonth(), -1), curMonth()].filter(m => m >= minMonth() && !isClosed(m));
 function dupPairs() { return cached('dup', () => dupPairs_()); }
 function dupPairs_() {
@@ -798,7 +802,9 @@ function viewReview() {
   const seg = `<div class="seg rvseg"><button class="${S.rv !== 'fixed' ? 'on' : ''}" data-act="rvseg" data-v="todo">לטיפול${todo ? ` (${todo})` : ''}</button><button class="${S.rv === 'fixed' ? 'on' : ''}" data-act="rvseg" data-v="fixed">קבועות ${mName(S.month)}</button></div>`;
   if (S.rv === 'fixed') return `<h1 class="hero">הוצאות <span class="script blue">קבועות</span></h1>${seg}${fixedByGroup(S.month)}`;
   const fa = D.meta.fxAsk || [], fc = D.meta.fxChanges || [];
+  const cm = [...new Set([...pc, ...ra].filter(t => isClosed(t.month)).map(t => sheetName(t.month)))];
   return `<h1 class="hero">מה <span class="script blue">לבדוק</span>?</h1>${seg}
+    ${cm.length ? `<div class="card" style="padding:10px 14px;margin-bottom:10px;font-size:13.5px;line-height:1.55">יש כאן שורות של כסף שנכנס מחודשים שכבר נסגרו באקסל (${cm.join(', ')}) – הכלל של ההחזרים שינה אותן אחרי הסגירה. אחרי שבוחרים להן סעיף: ייצוא לאקסל שכולל את החודשים האלה, ובאקסל "ייבוא מאיפה הכסף" – הוא יראה מה עובר ויבקש אישור.</div>` : ''}
     ${mn.length ? `<div class="label">לבדוק סכום – יש בהודעה יותר ממספר אחד (${mn.length})</div>${mn.map(t => `<div class="card rv"><div class="meta"><span>${dShort(t.date)} ${t.time || ''} · ${esc(t.person || '')}</span><span class="amt">${ils(Math.abs(t.amount))}</span></div>
         <div class="t">${esc(t.text)}</div>
         <div class="chips"><button data-act="mn-ok" data-id="${esc(t.id)}">הסכום נכון: ${ils(Math.abs(t.amount))}</button><button data-act="mn-fix" data-id="${esc(t.id)}" style="color:var(--blue);font-weight:600">לתקן סכום</button></div></div>`).join('')}` : ''}
@@ -810,7 +816,7 @@ function viewReview() {
     ${dp.length ? `<div class="label">אולי נרשם פעמיים? (${dp.length})</div>${dp.map(([a, b]) => `<div class="card rv"><div class="meta"><span>${dShort(a.date)}</span><span class="amt">${ils(Math.abs(a.amount))}</span></div>
         <div class="t">• ${esc(a.person)}: ${esc(a.text)}<br>• ${esc(b.person)}: ${esc(b.text)}</div>
         <div class="chips"><button data-act="dup-skip" data-id="${esc(b.id)}">זה כפול – לספור פעם אחת</button><button data-act="dup-ok" data-a="${esc(a.id)}" data-b="${esc(b.id)}" style="color:var(--muted)">שתי הוצאות שונות</button></div></div>`).join('')}` : ''}
-    ${ra.length ? `<div class="label">על איזו הוצאה ההחזר? (${ra.length})</div>${ra.map(t => `<div class="card rv"><div class="meta"><span>${dShort(t.date)} ${t.time || ''} · ${esc(t.person || '')}</span><span class="amt green">+${ils(Math.abs(t.amount))}</span></div>
+    ${ra.length ? `<div class="label">על איזו הוצאה ההחזר? (${ra.length})</div>${ra.map(t => `<div class="card rv"><div class="meta"><span>${dShort(t.date)} ${t.time || ''} · ${esc(t.person || '')}${closedTag(t)}</span><span class="amt green">+${ils(Math.abs(t.amount))}</span></div>
         <div class="t">${esc(t.text)}</div>
         <div class="chips">${t.rfAsk.map(e => `<button data-act="rf-link" data-id="${esc(t.id)}" data-e="${esc(e)}">${esc(rfLabel(e))}</button>`).join('')}
           ${incCats().map(c => `<button data-act="rf-inc" data-id="${esc(t.id)}" data-c="${esc(c.id)}" class="incchip">+ ${esc(c.name)}</button>`).join('')}
@@ -867,9 +873,9 @@ function pendGroups() {
 const learnWords = t => String(t.desc || '').replace(/[()"]/g, ' ').split(/\s+/).filter(w => w.length >= 2 && !/^\d/.test(w) && !/^(התקבל|החזר|העברה|בביט|ביט|לפייבוקס|בפייבוקס|פייבוקס|מזומן|עבור|של|על|את|לבנק)$/.test(w));
 function rvGroup(g) {
   const t = g.items[0], n = g.items.length, word = learnWords(t).slice(0, 2).join(' '), gk = esc(g.key);
-  const lines = g.items.slice(0, 3).map(x => `<div class="rvl"><span>${dShort(x.date)} · ${esc(x.person || '')}</span><span>${x.incoming ? '+' : ''}${ils(Math.abs(x.amount))}</span></div>`).join('');
+  const lines = g.items.slice(0, 3).map(x => `<div class="rvl"><span>${dShort(x.date)} · ${esc(x.person || '')}${closedTag(x)}</span><span>${x.incoming ? '+' : ''}${ils(Math.abs(x.amount))}</span></div>`).join('');
   return `<div class="card rv">
-    ${n === 1 ? `<div class="meta"><span>${dShort(t.date)} ${t.time || ''} · ${esc(t.person || '')}</span><span class="amt ${t.incoming ? 'green' : ''}">${t.incoming ? '+' : ''}${ils(Math.abs(t.amount))}</span></div><div class="t">${esc(t.text)}</div>`
+    ${n === 1 ? `<div class="meta"><span>${dShort(t.date)} ${t.time || ''} · ${esc(t.person || '')}${closedTag(t)}</span><span class="amt ${t.incoming ? 'green' : ''}">${t.incoming ? '+' : ''}${ils(Math.abs(t.amount))}</span></div><div class="t">${esc(t.text)}</div>`
       : `<div class="meta"><span><b style="font-size:16px;color:var(--ink)">${esc(t.desc || t.text)}</b> ×${n}</span><span class="amt">${ils(Math.abs(sumA(g.items)))}</span></div>${lines}${n > 3 ? `<div class="note" style="margin:2px 0 0">ועוד ${n - 3}</div>` : ''}`}
     <div class="chips">${quickCats(t).map(c => `<button data-act="rvg-cat" data-g="${gk}" data-c="${c.id}"${incChip(c)}>${isIncome(c) ? '+ ' : ''}${esc(c.name)}</button>`).join('')}
       <button data-act="rvg-more" data-g="${gk}" style="color:var(--blue);font-weight:600">סעיף אחר…</button>
@@ -1822,7 +1828,7 @@ window.addEventListener('popstate', () => {
   setTimeout(() => { if (!guardActive) pushGuard(); }, 2200);
 });
 /* =============== installed app: share target + updates =============== */
-const APP_VERSION = '2.9';
+const APP_VERSION = '3.0';
 async function importPendingShare() {
   let c; try { c = await caches.open('shared'); } catch { return; }
   const fr = await c.match('./shared-file'), ir = await c.match('./shared-info');

@@ -245,6 +245,18 @@ def main():
         check('closed month: each income section shows the lines it is made of', 'הכנסות נוספות' in it and 'התקבל משכורת' in it and 'אין פירוט באפליקציה' in it, it[:400])
         ev("stack.slice().forEach(e => closeSheet(e)); delete D.closed['2026-11']; save(false);"); pg.wait_for_timeout(250)
 
+        print('money in, in a month closed in Excel')
+        ev("() => { const id = D.chat.find(i => /500 מתנה/.test(i.text)).id; delete D.ov[id]; D.kw = D.kw.filter(([k]) => k !== 'מתנה'); recategorize(); D.closed = D.closed || {}; D.closed['2026-12'] = {c1: 100}; save(false); }")
+        check('a "התקבל" line without a section in a closed month is asked about in review', ev("pendingChat().some(t => /500 מתנה/.test(t.text))"))
+        ev("S.month = '2026-12'; S.rv = 'todo'; ACT.view({dataset: {v: 'review'}})")
+        check('…marked as a closed month, with what to do next', 'חודש סגור' in pg.locator('#app').inner_text() and 'ייבוא מאיפה הכסף' in pg.locator('#app').inner_text())
+        ev("() => { const g = pendGroups().find(g => g.items.some(t => /500 מתנה/.test(t.text))); groupPick(g.key, 'c1'); }")
+        ex = ev("""async () => { let wbRef = null; window.download = () => {}; const X = await loadXLSX(); const w = X.write;
+            X.write = (wb, o) => { wbRef = wb; return w(wb, o); }; await doExport('2026-12', '2026-12', true); X.write = w;
+            return X.utils.sheet_to_json(wbRef.Sheets['תנועות'], {header: 1}).filter(r => String(r[7] || '').includes('500 מתנה')).map(r => [r[3], r[5]]); }""")
+        check('…and once it has a section it goes out in the Excel export of that month', ex == [['סופר', -500]], ex)
+        ev("() => { delete D.closed['2026-12']; const id = D.chat.find(i => /500 מתנה/.test(i.text)).id; delete D.ov[id]; D.kw = D.kw.filter(([k]) => k !== 'מתנה'); recategorize(); save(false); }")
+
         print('home squares')
         ev("S.month = '2026-11'; ACT.view({dataset: {v: 'home'}})")
         pg.locator('[data-act=incdet]').click(); pg.wait_for_timeout(300)
