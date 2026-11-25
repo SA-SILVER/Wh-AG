@@ -57,7 +57,7 @@ def main():
         ctx = b.new_context(viewport={'width': 390, 'height': 844}, has_touch=True)
         pg = ctx.new_page(); errs = []
         pg.on('pageerror', lambda e: errs.append(str(e)))
-        pg.goto(url); pg.wait_for_function('typeof render === "function" && document.querySelector("#app").innerHTML.length > 0')
+        pg.goto(url); wait_js(pg, 'typeof render === "function" && document.querySelector("#app").innerHTML.length > 0')
         ev = pg.evaluate
         def imp(txt): return ev("async t => { await importFile(new File([t], 'c.txt')); stack.slice().forEach(e => closeSheet(e)); return D.chat.map(i => i.id); }", txt)
 
@@ -255,6 +255,26 @@ def main():
         ev("stack.slice().forEach(e => closeSheet(e))"); pg.wait_for_timeout(250)
         sel = ev("({body: getComputedStyle(document.body).userSelect, inp: (() => { const i = document.createElement('input'); document.body.appendChild(i); const v = getComputedStyle(i).userSelect; i.remove(); return v; })()})")
         check('text on the screen can\'t be selected, typing fields can', sel['body'] == 'none' and sel['inp'] != 'none', sel)
+
+        print('swipe between months')
+        SW = """([sel, dx]) => { const el = sel === 'sheet' ? stack[stack.length - 1].sh.querySelector('.chip, h3, .card') : document.querySelector(sel);
+            const r = el.getBoundingClientRect(), x = r.left + r.width / 2, y = r.top + Math.min(r.height / 2, 20);
+            const T = (cx) => new Touch({identifier: 1, target: el, clientX: cx, clientY: y});
+            el.dispatchEvent(new TouchEvent('touchstart', {bubbles: true, touches: [T(x)], changedTouches: [T(x)]}));
+            el.dispatchEvent(new TouchEvent('touchend', {bubbles: true, touches: [], changedTouches: [T(x + dx)]}));
+            return S.month; }"""
+        ev("S.month = '2026-10'; S.rv = 'todo'; ACT.view({dataset: {v: 'review'}})")
+        check('swipe right = next month (starting on a choice button too)', ev(SW, ['.chips button', 120]) == '2026-11')
+        check('swipe left = previous month', ev(SW, ['#app .hero', -120]) == '2026-10')
+        ev("ACT.view({dataset: {v: 'data'}})")
+        check('swipe works on the details screen', ev(SW, ['#app .hero', 120]) == '2026-11')
+        ev("groupSheet(D.cfg.groups[0].id)"); pg.wait_for_timeout(300)
+        m = ev(SW, ['sheet', -120]); pg.wait_for_timeout(250)
+        check('swipe works inside a window that shows a month, and the window follows', m == '2026-10' and 'אוקטובר' in pg.locator('.sheet').last.inner_text(), (m, pg.locator('.sheet').last.inner_text()[:80]))
+        ev("stack.slice().forEach(e => closeSheet(e))"); pg.wait_for_timeout(250)
+        ev("txSheet(D.chat[0].id)"); pg.wait_for_timeout(300)
+        check('a window of one line does not change month', ev(SW, ['sheet', 120]) == '2026-10')
+        ev("stack.slice().forEach(e => closeSheet(e))"); pg.wait_for_timeout(250)
 
         print('fits the phone')
         vp = pg.locator('meta[name=viewport]').get_attribute('content')

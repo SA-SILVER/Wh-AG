@@ -1028,7 +1028,7 @@ function catSheet(id) {
       <div class="row2" style="margin-top:6px"><button class="ghost" data-act="manual" data-id="${esc(id)}">+ הוספה ידנית</button><button class="ghost" data-act="catedit" data-id="${esc(id)}">שם והגדרות</button></div>
       <div class="label">ששת החודשים האחרונים</div><div class="card" style="display:flex;align-items:flex-end;gap:8px;height:150px;padding-bottom:10px">
       ${ms.map((m, i) => `<div style="flex:1;text-align:center;font-size:12px"><div style="font-weight:600;margin-bottom:3px">${vals[i] ? fmt(vals[i], 0) : ''}</div><div style="height:${Math.max(3, Math.abs(vals[i]) / mx * 80)}px;background:${m === S.month ? 'var(--blue)' : 'var(--blue-soft)'};border-radius:7px"></div><div style="margin-top:4px;color:var(--muted)">${sheetName(m)}</div></div>`).join('')}</div>`;
-  }, {live: true});
+  }, {live: true, month: true});
 }
 function groupSheet(gid) {
   openSheet(() => {
@@ -1042,7 +1042,7 @@ function groupSheet(gid) {
     return `${head(esc(g.name))}<div class="card fl-row"><span class="chip">${mLabel(S.month)}</span><span class="num">${ils(tot)}</span></div>
       <div class="card" style="margin-top:10px;padding:6px 14px">${gc.map(c => `<button class="catrow" data-act="cat" data-id="${esc(c.id)}"><div class="t"><b>${esc(c.name)}</b><b>${ils(md.byCat[c.id])}</b></div>
         <div class="bar ${isIncome(c) ? 'g' : ''}"><i style="width:${Math.abs(md.byCat[c.id]) / mx * 100}%"></i></div><div class="foot"><span>${cnt(c.id)} תנועות</span><span>${pcts(c)}</span></div></button>`).join('') || '<p class="note">אין תנועות</p>'}</div>`;
-  }, {live: true});
+  }, {live: true, month: true});
 }
 function catEditSheet(id) {
   const c = catById(id); if (!c) return;
@@ -1081,7 +1081,7 @@ function incDetailSheet() {
       ${blocks.length ? (closed ? `<div class="card" style="padding:2px 14px">${blocks.join('')}</div>` : blocks.join('')) : '<p class="note" style="text-align:center">אין הכנסות בחודש הזה</p>'}
       ${closed || !d.inc.some(t => t.src === 'income' && !t.ok) ? '' : '<p class="note" style="margin:8px 4px">הכנסה צפויה שעוד לא אושרה מסומנת "צפוי". לחיצה עליה – לאשר כמה נכנס בפועל.</p>'}
       <button class="ghost" data-act="income" style="margin-top:6px">הכנסות צפויות בכל חודש ⚙</button>`;
-  }, {live: true});
+  }, {live: true, month: true});
 }
 
 // how the balance on the home screen is made: income (also what is still expected) − what went out − fixed charges still to come
@@ -1099,7 +1099,7 @@ function balSheet() {
         <div class="txline" style="align-items:center;border-top:2px solid var(--line, #eee)"><div><b>= ${title}</b></div><div class="a ${d.bal < 0 ? 'red' : 'green'}">${d.bal < 0 ? '−' : ''} ${ils(Math.abs(d.bal), 0)}</div></div>
       </div>
       ${past ? '' : `<p class="note" style="margin:10px 4px;line-height:1.6">לא נכללות: הוצאות משתנות שעוד לא נכתבו בקבוצה (קניות, דלק וכד' בהמשך החודש)${d.md.pend ? `, ושורות בלי סעיף (${d.md.pend})` : ''}.${rfOpen ? ` החזרים שעוד מחכים (${ils(rfOpen, 0)}) לא נכללים – הם ייכנסו כשיגיעו.` : ''}</p>`}`;
-  }, {live: true});
+  }, {live: true, month: true});
 }
 
 /* ---- transaction detail ---- */
@@ -1303,7 +1303,7 @@ function paysSheet() {
 }
 function paySheet(pay) {
   openSheet(() => { const list = monthTx(S.month).filter(t => payKey(t) === pay && !t.pending); const tot = list.filter(t => !isIncome(catById(t.cat))).reduce((s, t) => s + t.amount, 0);
-    return `${head(esc(pay))}<p class="note">${mLabel(S.month)} · ${list.length} תנועות · הוצאות נטו ${ils(tot)}. נוח להשוואה מול פירוט הכרטיס.</p><div class="card">${list.map(txLine).join('') || '<p class="note">אין</p>'}</div>`; }, {live: true});
+    return `${head(esc(pay))}<p class="note">${mLabel(S.month)} · ${list.length} תנועות · הוצאות נטו ${ils(tot)}. נוח להשוואה מול פירוט הכרטיס.</p><div class="card">${list.map(txLine).join('') || '<p class="note">אין</p>'}</div>`; }, {live: true, month: true});
 }
 
 function syncSheet() {
@@ -1768,12 +1768,16 @@ document.addEventListener('change', ev => { const k = ev.target.dataset && ev.ta
 // the screen always fits the phone: no pinch zoom, no double-tap zoom, no sideways drag (iOS ignores the viewport tag)
 document.addEventListener('gesturestart', ev => ev.preventDefault(), {passive: false});
 document.addEventListener('touchmove', ev => { if (ev.touches.length > 1) ev.preventDefault(); }, {passive: false});
-// Swipe between months (RTL): swipe right = previous month, swipe left = next month.
+// Swipe between months from every screen, and in every window that shows a month (סעיף, קבוצה, הכנסות, יתרה, אמצעי תשלום).
+// Experimental direction: swipe right = next month, swipe left = previous month. To switch back: SWIPE_RIGHT_NEXT = false.
+const SWIPE_RIGHT_NEXT = true;
 let swipe = null;
+const topSheet = () => stack[stack.length - 1];
 document.addEventListener('touchstart', ev => {
   swipe = null;
-  if (!D || stack.length || ev.touches.length !== 1) return;
-  if (ev.target.closest('input, textarea, select, .chips, nav')) return;
+  if (!D || ev.touches.length !== 1 || document.body.classList.contains('locked')) return;
+  if (stack.length && !(topSheet().opts.month && topSheet().sh.contains(ev.target))) return;   // a window that is not about a month (a line, a form) stays put
+  if (ev.target.closest('input, textarea, select, nav')) return;
   const t = ev.touches[0]; swipe = {x: t.clientX, y: t.clientY, at: Date.now()};
 }, {passive: true});
 // long pages (פירוט, לבדיקה) scroll while the finger moves, and the browser may then end the touch with
@@ -1786,11 +1790,15 @@ function swipeEnd(t) {
   const dx = t.clientX - swipe.x, dy = t.clientY - swipe.y, dt = Date.now() - swipe.at;
   swipe = null;
   if (Math.abs(dx) < 70 || Math.abs(dx) < Math.abs(dy) * 1.8 || dt > 700) return;
-  const k = dx > 0 ? -1 : 1, m = addM(S.month, k);
+  const k = (dx > 0) === SWIPE_RIGHT_NEXT ? 1 : -1, m = addM(S.month, k);
   if (m < minMonth() || m > addM(curMonth(), 1)) return toast(k < 0 ? 'אין חודשים קודמים' : 'אין חודשים נוספים', 1400);
   S.month = m; render();
-  const app = $('#app'); app.style.transition = 'none'; app.style.opacity = '.4'; app.style.transform = `translateX(${k < 0 ? 24 : -24}px)`;
-  requestAnimationFrame(() => { app.style.transition = 'opacity .18s, transform .18s'; app.style.opacity = ''; app.style.transform = ''; });
+  const top = topSheet(); if (top && top.opts.month) top.paint();
+  // the new month comes in from the side the finger came from
+  const el = top && top.opts.month ? top.sh : $('#app');
+  el.style.transition = 'none'; el.style.opacity = '.4'; el.style.transform = `translateX(${dx > 0 ? -24 : 24}px)`;
+  requestAnimationFrame(() => { el.style.transition = 'opacity .18s, transform .18s'; el.style.opacity = ''; el.style.transform = ''; });
+  if (top && top.opts.month) toast(mName(m), 900);
 }
 // Back button: closes an open window, then returns to the home screen; leaving needs two presses in a row.
 let guardActive = false;          // a history entry pushed during a tap (browsers honour those)
@@ -1806,7 +1814,7 @@ window.addEventListener('popstate', () => {
   setTimeout(() => { if (!guardActive) pushGuard(); }, 2200);
 });
 /* =============== installed app: share target + updates =============== */
-const APP_VERSION = '2.7';
+const APP_VERSION = '2.8';
 async function importPendingShare() {
   let c; try { c = await caches.open('shared'); } catch { return; }
   const fr = await c.match('./shared-file'), ir = await c.match('./shared-info');
