@@ -155,6 +155,41 @@ def main():
         check('changelog has the current version on top', hist[0]['version'] == appv, hist[0])
         ev("stack.slice().forEach(e => closeSheet(e))")
 
+        print('refunds')
+        imp("\n".join([
+            "03/11/2026, 10:00 - שי: 450 שח עבור השתלמות, צריך להתקבל החזר",
+            "03/11/2026, 11:00 - שיראל: 1200 שח עבור משקפיים, יתקבל החזר מהביטוח",
+            "04/11/2026, 11:00 - שי: 300 ציוד למשרד, צריך להתקבל החזר",
+            "04/11/2026, 12:00 - שי: 200 מתנה לגננת, מגיע החזר מהוועד",
+            "10/11/2026, 08:00 - שי: התקבל משכורת 14000",
+            "12/11/2026, 09:00 - שי: התקבל 445 החזר",
+            "15/11/2026, 09:00 - שיראל: התקבל 700 החזר משקפיים",
+            "20/11/2026, 09:00 - שיראל: קיבלנו החזר 480 מהביטוח",
+            "21/11/2026, 09:00 - שי: התקבל 150 החזר",
+        ]))
+        ev("() => { for (const it of D.chat) if (!it.incoming) D.ov[it.id] = {cat: /משקפיים/.test(it.text) ? 'c10' : /משכורת/.test(it.text) ? 'c2' : 'c3'}; D.ov[D.chat.find(i => /445/.test(i.text)).id] = {cat: 'c23'}; save(false); }")
+        tx = lambda part: ev("p => { const t = chatTx(D.chat.find(i => i.text.includes(p))); return {amount: t.amount, cat: t.cat, done: t.refundDone, got: t.refundGot, ask: t.rfAsk, rfOf: t.rfOf}; }", part)
+        r1 = tx('445')
+        check('"צריך להתקבל החזר" marks the expense as waiting', tx('השתלמות')['got'] == 445, tx('השתלמות'))
+        check('refund of a slightly different amount goes to the expense\'s section as a minus (even if it was put in income before)', r1['amount'] == -445 and r1['cat'] == 'c3', r1)
+        check('…and closes that expense', tx('השתלמות')['done'], tx('השתלמות'))
+        r2, r3 = tx('700'), tx('480')
+        check('refund in two messages: both minus in the same section', r2['amount'] == -700 and r3['amount'] == -480 and r2['cat'] == r3['cat'] == 'c10', (r2, r3))
+        check('expense closes only after most of it came back', tx('משקפיים')['got'] == 1180 and tx('משקפיים')['done'], tx('משקפיים'))
+        check('"קיבלנו החזר" is money in', r3['amount'] < 0)
+        r4 = tx('150')
+        check('unclear refund is asked about, not guessed', r4['ask'] and not r4['rfOf'] and ev("rfAsks().length") == 1, r4)
+        check('salary is not touched', tx('משכורת')['amount'] == 14000 and tx('משכורת')['cat'] == 'c2')
+        ev("() => { const t = rfAsks()[0]; ACT['rf-link']({dataset: {id: t.id, e: D.chat.find(i => /גננת/.test(i.text)).id}}); }")
+        r4 = tx('150')
+        check('answering ties it: minus in that expense\'s section', r4['amount'] == -150 and r4['cat'] == 'c3' and ev("rfAsks().length") == 0, r4)
+        ev("() => { const id = D.chat.find(i => i.text.includes('445')).id; ACT['rf-none']({dataset: {id}}); }")
+        check('"not this expense" unties it', not tx('445')['rfOf'] and not tx('השתלמות')['done'], (tx('445'), tx('השתלמות')))
+        ev("() => { const id = D.chat.find(i => i.text.includes('445')).id; ACT['t-reset']({dataset: {id}}); }")
+        check('an expense and its refund on the same day are not called a double entry', ev("dupPairs().every(([a, b]) => !!a.incoming === !!b.incoming)"))
+        ev("S.month = '2026-11'; S.rv = 'todo'; ACT.view({dataset: {v: 'review'}})")
+        check('review shows what is still waiting for a refund', 'מחכות להחזר' in pg.locator('#app').inner_text())
+
         print('screens render without errors')
         for v in ['home', 'data', 'review']:
             ev(f"ACT.view({{dataset: {{v: '{v}'}}}})")
