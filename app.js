@@ -206,6 +206,7 @@ function rfWords(t) {
 }
 // the expense's own words, without "צריך להתקבל החזר" and the like
 const rfShort = d => String(d || '').replace(new RegExp(REFUND_EXP.source, 'g'), ' ').replace(/(?<![֐-׿])(צריך|עבור|אמור)(?![֐-׿])/g, ' ').replace(/[,]+/g, ' ').replace(/ {2,}/g, ' ').trim();
+const chatItem = id => D.chat.find(x => x.id === id) || (D.rfPre || []).find(x => x.id === id);
 const rfSkipped = it => { const o = D.ov[it.id] || {}; return o.skip === true || (it.autoSkip && o.skip !== false); };
 const rfIsIn = it => !!it.incoming && isRefundText(it.text || '');
 const rfAmtOf = it => { const o = D.ov[it.id] || {}; return o.amount != null ? o.amount : it.amount; };
@@ -213,9 +214,11 @@ const rfAmtOf = it => { const o = D.ov[it.id] || {}; return o.amount != null ? o
 const rfWant = it => { const o = D.ov[it.id] || {}; return it.refundAmt && it.refundAmt !== it.amount ? it.refundAmt : rfAmtOf(it); };
 function refundLinks() { return cached('rfl', refundLinks_); }
 function refundLinks_() {
-  const of = {}, ask = {}, got = {}, list = {}, want = {}, byId = {};
-  const open = [];
-  const chron = D.chat.filter(it => !rfSkipped(it)).sort((a, b) => tKey(a).localeCompare(tKey(b)));
+  const of = {}, ask = {}, got = {}, list = {}, want = {}, byId = {}, pre = {};
+  const open = [], ids = new Set(D.chat.map(i => i.id));
+  const preItems = (D.rfPre || []).filter(p => p.date < D.cfg.start && !ids.has(p.id));
+  for (const p of preItems) pre[p.id] = true;
+  const chron = [...preItems, ...D.chat].filter(it => !rfSkipped(it)).sort((a, b) => tKey(a).localeCompare(tKey(b)));
   const rem = x => want[x.it.id] - got[x.it.id];
   const closed = x => { const o = D.ov[x.it.id] || {}; return got[x.it.id] >= want[x.it.id] * RF_DONE || (o.refundDone === true && got[x.it.id] > 0); };
   for (const it of chron) {
@@ -246,7 +249,7 @@ function refundLinks_() {
     }
     if (e) { of[it.id] = e.it.id; got[e.it.id] += a; list[e.it.id].push(it.id); }
   }
-  return {of, ask, got, list, want, byId};
+  return {of, ask, got, list, want, byId, pre};
 }
 // state of an expense that waits for a refund
 function rfState(id) {
@@ -256,7 +259,7 @@ function rfState(id) {
 }
 // expenses a refund may be tied to by hand: waiting for money back, written before it, in the last year
 function rfChoices(refundId) {
-  const it = D.chat.find(x => x.id === refundId); if (!it) return [];
+  const it = chatItem(refundId); if (!it) return [];
   const L = refundLinks();
   return Object.values(L.byId).filter(e => e.date <= it.date && (Date.parse(it.date) - Date.parse(e.date)) / 864e5 <= 365)
     .sort((a, b) => tKey(b).localeCompare(tKey(a))).slice(0, 8).map(e => e.id);
@@ -268,11 +271,16 @@ function chatTx(it, withSkipped) {
   const o = D.ov[it.id] || {};
   const skip = o.skip === true || (it.autoSkip && o.skip !== false);
   if (skip && !withSkipped) return null;
-  let cat = o.cat || it.cat || '', desc = it.desc || it.text, rfOf = '', rfAsk = null;
+  let cat = o.cat || it.cat || '', desc = it.desc || it.text, rfOf = '', rfAsk = null, rfPre = false;
   if (it.incoming) {
     const L = refundLinks();
-    rfOf = L.of[it.id] || ''; rfAsk = L.ask[it.id] || null;
-    if (rfOf) { const e = L.byId[rfOf], eo = D.ov[rfOf] || {}; cat = eo.cat || e.cat || ''; const sd = rfShort(e.desc); if (sd) desc = `${desc} · על ${sd}`; }
+    rfOf = L.of[it.id] || ''; rfAsk = L.ask[it.id] || null; rfPre = !!(rfOf && L.pre[rfOf]);
+    if (rfOf) {
+      const e = L.byId[rfOf], eo = D.ov[rfOf] || {};
+      // an expense from before the budget start may have no section yet: then the refund's own choice counts
+      cat = eo.cat || e.cat || (rfPre ? cat : '');
+      const sd = rfShort(e.desc); if (sd) desc = `${desc} · על ${sd}${rfPre ? ` (${dShort(e.date)})` : ''}`;
+    }
   }
   const c = catById(cat);
   const raw = o.amount != null ? o.amount : it.amount;
@@ -280,7 +288,7 @@ function chatTx(it, withSkipped) {
   const rs = it.refundExp && !it.incoming ? rfState(it.id) : null;
   return {id: it.id, src: 'chat', date: it.date, time: it.time, month: it.date.slice(0, 7), amount: amt, cat: c ? cat : '', desc, text: it.text,
     pay: o.pay || it.pay, person: it.person, note: o.note || '', refundExp: !!rs, refundAmt: rs ? rs.want : 0, refundDone: rs ? rs.done : false, refundGot: rs ? rs.got : 0,
-    rfOf, rfAsk, pending: !c, incoming: it.incoming, skipped: skip, autoSkip: !!it.autoSkip};
+    rfOf, rfAsk, rfPre, preBudget: it.date < D.cfg.start, pending: !c, incoming: it.incoming, skipped: skip, autoSkip: !!it.autoSkip};
 }
 function fixedActive(f, m) {
   if (f.from && m < f.from) return false;
@@ -342,7 +350,7 @@ function monthData_(m) {
 }
 function pendingChat() { return cached('pend', () => pendingChat_()); }
 // a refund tied to an expense follows that expense's section, and one that waits for "which expense?" is asked separately
-function pendingChat_() { return D.chat.map(it => chatTx(it)).filter(t => t && t.pending && !t.rfOf && !t.rfAsk && t.date >= D.cfg.start && !isClosed(t.month)).sort((a, b) => a.date.localeCompare(b.date)); }
+function pendingChat_() { return D.chat.map(it => chatTx(it)).filter(t => t && t.pending && (!t.rfOf || t.rfPre) && !t.rfAsk && t.date >= D.cfg.start && !isClosed(t.month)).sort((a, b) => a.date.localeCompare(b.date)); }
 function rfAsks() { return cached('rfask', () => D.chat.map(it => chatTx(it)).filter(t => t && t.rfAsk && t.date >= D.cfg.start && !isClosed(t.month)).sort((a, b) => a.date.localeCompare(b.date))); }
 const reviewMonths = () => [addM(curMonth(), -1), curMonth()].filter(m => m >= minMonth() && !isClosed(m));
 function dupPairs() { return cached('dup', () => dupPairs_()); }
@@ -509,7 +517,11 @@ function parseChat(text) {
     items.push({id: base + '#' + seen[base], date: cur.date, time: cur.time, sender: cur.sender, person, text: msg, desc, amount: n.value, incoming, cat,
       pay: pd.pay, autoSkip, refundExp, multi, refundAmt: ra ? +ra : (refundExp ? n.value : 0)});
   }
-  return {items: items.filter(i => i.date >= D.cfg.start), all: items.length, order, senders: [...senders], addedPays};
+  // expenses from the year before the budget start that wait for a refund are kept aside (not counted anywhere),
+  // only so that a refund arriving after the start still comes off that expense's section
+  const preFrom = new Date(Date.parse(D.cfg.start) - 365 * 864e5).toISOString().slice(0, 10);
+  const pre = items.filter(i => i.date < D.cfg.start && i.date >= preFrom && i.refundExp && !i.incoming);
+  return {items: items.filter(i => i.date >= D.cfg.start), all: items.length, order, senders: [...senders], addedPays, pre, preSeen: items.some(i => i.date < D.cfg.start)};
 }
 async function readChatFile(file) {
   const u8 = new Uint8Array(await file.arrayBuffer());
@@ -575,6 +587,7 @@ async function importFile(file, fromShare) {
   if (!r.all) { toast('לא נמצאו בקובץ הודעות עם סכום. האם זה ייצוא צ\'אט של ווטסאפ?', 5000); return; }
   const before = pendingChat().length;
   const m = mergeChat(r.items);
+  if (r.preSeen) D.rfPre = r.pre;
   const last = r.items.length ? r.items[r.items.length - 1] : null;
   const prevUntil = (D.meta.lastImport || {}).until || '', until = last ? `${last.date} ${last.time}` : '';
   D.meta.lastImport = {at: Date.now(), file: fromShare ? 'שיתוף מווטסאפ' : file.name, until: until && until > prevUntil ? until : (prevUntil || until), order: r.order};
@@ -702,8 +715,8 @@ function viewHome() {
     ${days >= 7 && !S.dismissed.has('bk') ? `<button class="banner" data-act="backup" style="background:#FDEAF1"><span>💾 יש שינויים שלא גובו כבר ${days} ימים</span><b>לגבות ←</b></button>` : ''}
     ${pAll && !d.closed ? `<button class="banner" data-act="view" data-v="review"><span>${d.md.pend ? `${d.md.pend === 1 ? 'שורה אחת' : d.md.pend + ' שורות'} ב${mName(S.month)}${pAll > d.md.pend ? ` (${pAll} בסך הכל)` : ''}` : `${pAll === 1 ? 'שורה אחת' : pAll + ' שורות'} מחודשים אחרים`} עוד בלי סעיף, ולא נספרות</span><b>לסדר ←</b></button>` : ''}
     <div class="stat kpi">
-      <div><span>הכנסות</span><b>${fmt(d.incExp, 0)}</b><span>${d.incIn < d.incExp ? `נכנס ${fmt(d.incIn, 0)}` : d.incExp ? 'הכל נכנס' : '—'}</span></div>
-      ${past ? `<div><span>מתוכן קבועות</span><b>${fmt(fxTot, 0)}</b><span>משכנתא, הו"ק וכד'</span></div>`
+      <div data-act="incdet"><span>הכנסות</span><b>${fmt(d.incExp, 0)}</b><span>${d.incIn < d.incExp ? `נכנס ${fmt(d.incIn, 0)}` : d.incExp ? 'הכל נכנס' : '—'}</span></div>
+      ${past ? `<div data-act="view" data-v="review" data-rv="fixed"><span>מתוכן קבועות</span><b>${fmt(fxTot, 0)}</b><span>משכנתא, הו"ק וכד'</span></div>`
         : `<div data-act="view" data-v="review" data-rv="fixed"><span>עוד צפוי לרדת</span><b>${fmt(d.upc, 0)}</b><span>${upN ? `${upN === 1 ? 'חיוב קבוע אחד' : upN + ' חיובים קבועים'}` : 'הקבועות כבר ירדו'}</span></div>`}
       <div><span>${past ? (d.bal >= 0 ? 'עודף' : 'חוסר') : (d.bal >= 0 ? 'יתרה צפויה' : 'חוסר צפוי')}</span><b class="${d.bal < 0 ? 'red' : ''}">${fmt(Math.abs(d.bal), 0)}</b><span>${d.incExp ? 'הכנסות פחות הוצאות' : 'אין הכנסות מוגדרות'}</span>${d.closed ? '' : monthLeft(S.month)}</div>
     </div>
@@ -876,15 +889,19 @@ function quickCats(t) {
 function groupPick(key, cat) {
   const g = pendGroups().find(x => x.key === key); if (!g) return;
   const learn = $(`[data-learn="${CSS.escape(key)}"]`), word = ($(`[data-lw="${CSS.escape(key)}"]`) || {}).value || '';
-  for (const t of g.items) D.ov[t.id] = {...(D.ov[t.id] || {}), ...(cat === SKIP ? {skip: true} : {cat})};
+  for (const t of g.items) { D.ov[t.id] = {...(D.ov[t.id] || {}), ...(cat === SKIP ? {skip: true} : {cat})}; if (t.rfPre && cat !== SKIP) D.ov[t.rfOf] = {...(D.ov[t.rfOf] || {}), cat}; }
   let msg = cat === SKIP ? (g.items.length === 1 ? 'השורה לא תיספר' : `${g.items.length} שורות לא ייספרו`) : (g.items.length === 1 ? `← ${catById(cat).name}` : `${g.items.length} שורות ← ${catById(cat).name}`);
   if (learn && learn.checked && word.trim()) { const w = word.trim(); D.kw = D.kw.filter(([k]) => k !== w); D.kw.push([w, cat]); recategorize(); msg += ` · "${w}" נלמד`; }
   save(); render(); toast(msg);
 }
 function setChatCat(id, cat) {
-  const it = D.chat.find(x => x.id === id); if (!it) return;
+  const it = chatItem(id); if (!it) return;
   D.ov[id] = {...(D.ov[id] || {}), cat};
-  if (it.incoming && refundLinks().of[id]) D.ov[id].rfOf = 'none';     // a section chosen by hand: no longer tied to the expense
+  const L = refundLinks(), ex = it.incoming && L.of[id];
+  // tied to an expense from before the budget start: the section goes to that expense (its other refunds follow);
+  // tied to an expense inside the budget: a section chosen by hand unties it
+  if (ex && L.pre[ex]) D.ov[ex] = {...(D.ov[ex] || {}), cat};
+  else if (ex) D.ov[id].rfOf = 'none';
   save(); render(); refreshSheets();
   if (!it.incoming) learnSheet(it, cat);
 }
@@ -926,6 +943,7 @@ function recategorize() {
     else it.cat = suggestCat(it.desc, false) || '';
     it.autoSkip = it.cat === SKIP; if (it.autoSkip) it.cat = '';
   }
+  for (const it of D.rfPre || []) { it.cat = suggestCat(it.desc, false) || ''; if (it.cat === SKIP) it.cat = ''; }
 }
 
 /* =============== sheets =============== */
@@ -954,7 +972,7 @@ const head = t => `<div class="sh-head"><h3>${t}</h3><button class="x-btn" data-
 function findTx(id) {
   if (id.startsWith('i:')) return entryByKey('inc:' + id.slice(2));
   if (id.startsWith('f:')) { const [fid, m] = id.slice(2).split('|'); return fixedFor(m).find(x => x.fid === fid); }
-  const it = D.chat.find(x => x.id === id); if (it) return chatTx(it, true);
+  const it = chatItem(id); if (it) return chatTx(it, true);
   const mx = D.manual.find(x => x.id === id); return mx ? manualTx(mx) : null;
 }
 function pickCat(title, income, cur, onPick, withSkip) {
@@ -1030,6 +1048,24 @@ function catEditSheet(id) {
   });
 }
 
+// the income of the month by section: what came in and what is still expected; a month closed in Excel shows Excel's amounts
+function incDetailSheet() {
+  openSheet(() => {
+    const m = S.month, d = dash(m), md = d.md, closed = md.closed;
+    const ic = cats().filter(isIncome);
+    const blocks = closed
+      ? ic.filter(c => md.byCat[c.id]).map(c => `<button class="txline" data-act="cat" data-id="${esc(c.id)}"><div><div class="a green">${ils(md.byCat[c.id])}</div><div class="d">${esc(c.name)}</div></div><div class="r"><span style="color:var(--green)">בפועל ✓</span></div></button>`)
+      : ic.map(c => ({c, items: d.inc.filter(t => t.cat === c.id)})).filter(b => b.items.length).sort((a, b) => sumA(b.items) - sumA(a.items))
+          .map(b => `<div class="card fxg"><div class="fxg-h"><b>${esc(b.c.name)}</b><span>${ils(sumA(b.items), 0)}</span></div>${b.items.map(t => txLine(t)).join('')}</div>`);
+    const left = d.incExp - d.incIn;
+    return `${head(`הכנסות – ${mName(m)}${closed ? ' · לפי האקסל' : ''}`)}
+      <div class="card" style="padding:10px 14px;margin-bottom:10px;display:flex;justify-content:space-between;font-size:13.5px"><span>${closed ? 'נכנס בפועל' : 'נכנס עד היום'} <b>${ils(d.incIn, 0)}</b></span>${!closed && left > 0 ? `<span>עוד צפוי <b>${ils(left, 0)}</b></span><span style="color:var(--muted)">סה"כ ${ils(d.incExp, 0)}</span>` : ''}</div>
+      ${blocks.length ? (closed ? `<div class="card" style="padding:2px 14px">${blocks.join('')}</div>` : blocks.join('')) : '<p class="note" style="text-align:center">אין הכנסות בחודש הזה</p>'}
+      ${closed || !d.inc.some(t => t.src === 'income' && !t.ok) ? '' : '<p class="note" style="margin:8px 4px">הכנסה צפויה שעוד לא אושרה מסומנת "צפוי". לחיצה עליה – לאשר כמה נכנס בפועל.</p>'}
+      <button class="ghost" data-act="income" style="margin-top:6px">הכנסות צפויות בכל חודש ⚙</button>`;
+  }, {live: true});
+}
+
 /* ---- transaction detail ---- */
 function txSheet(id) {
   openSheet(() => {
@@ -1041,7 +1077,7 @@ function txSheet(id) {
         <button data-act="t-pay" data-id="${esc(id)}">אמצעי תשלום <span class="v">${esc(t.pay || '—')}</span></button>
         <button data-act="t-note" data-id="${esc(id)}">${t.note ? 'לערוך הערה' : 'להוסיף הערה'} <span>💬</span></button>
         ${t.refundExp ? `<button data-act="rf-done" data-id="${esc(id)}">${t.refundDone ? 'לסמן שההחזר עוד לא התקבל' : 'ההחזר התקבל'} <span>✓</span></button>` : ''}
-        ${t.rfOf ? `<button data-act="rf-none" data-id="${esc(id)}">ההחזר לא שייך להוצאה הזו <span>✂</span></button>` : rfIsIn(D.chat.find(x => x.id === id) || {}) && rfChoices(id).length ? `<button data-act="rf-pick" data-id="${esc(id)}">לחבר להוצאה שמחכה להחזר <span>↩︎</span></button>` : ''}
+        ${t.rfOf ? `<button data-act="rf-none" data-id="${esc(id)}">ההחזר לא שייך להוצאה הזו <span>✂</span></button>` : rfIsIn(chatItem(id) || {}) && rfChoices(id).length ? `<button data-act="rf-pick" data-id="${esc(id)}">לחבר להוצאה שמחכה להחזר <span>↩︎</span></button>` : ''}
         ${o.cat != null || o.amount != null || o.pay != null || o.rfOf != null ? `<button data-act="t-reset" data-id="${esc(id)}">לבטל את התיקונים שלי <span>↺</span></button>` : ''}
         <button data-act="t-skip" data-id="${esc(id)}" class="danger">${t.skipped ? 'להחזיר לייבוא' : 'לא לייבא את השורה הזו'} <span>⊘</span></button>`
       : t.src === 'income' ? `
@@ -1060,6 +1096,7 @@ function txSheet(id) {
         <div class="s">${SRC_ICON[t.src]} ${t.src === 'chat' ? 'מהווטסאפ' : t.src === 'income' ? (t.ok ? 'הכנסה · אושרה' : 'הכנסה צפויה · עוד לא אושרה') : t.src === 'fixed' ? (t.ok ? 'קבועה · ירדה' : 'קבועה · צפויה') : 'הוזן ידנית'} | ${esc(t.pay || '—')}${t.person ? ' | ' + esc(t.person) : ''}</div>
         ${t.text ? `<div class="orig">${esc(t.text)}</div>` : `<div class="s">${esc(t.desc)}</div>`}
         ${t.note ? `<div class="s">📝 ${esc(t.note)}</div>` : ''}${t.refundExp ? `<div class="s">${t.refundDone ? '✓ ההחזר התקבל' : `צפוי החזר ${ils(t.refundAmt || t.amount)}`}${t.refundGot ? ` · חזרו ${ils(t.refundGot)}` : ''}</div>${(rfState(id).refunds).map(r => { const x = findTx(r); return x ? `<div class="s"><button class="catlink" data-act="tx" data-id="${esc(r)}">↩︎ ${ils(Math.abs(x.amount))} ב-${dShort(x.date)} ›</button></div>` : ''; }).join('')}` : ''}
+        ${t.preBudget && t.refundExp ? `<div class="s">מלפני תחילת התקציב – לא נספרת. ההחזרים עליה יורדים מהסעיף שלה.</div>` : ''}
         ${t.rfOf ? `<div class="s"><button class="catlink" data-act="tx" data-id="${esc(t.rfOf)}">↩︎ החזר על: ${esc(rfLabel(t.rfOf))} ›</button></div>` : ''}</div>
       <div class="actlist">${c ? `<button data-act="cat" data-id="${esc(c.id)}">לסעיף "${esc(c.name)}" – כל התנועות בו <span>›</span></button>` : ''}${acts}</div>`;
   }, {live: true});
@@ -1650,6 +1687,7 @@ const ACT = {
   dismiss: el => { S.dismissed.add(el.dataset.id); render(); },
   settings: () => settingsSheet(),
   income: () => incomeSheet(),
+  incdet: () => incDetailSheet(),
   cats: () => catsSheet(),
   budgets: () => incomeSheet(),
   grp: el => groupSheet(el.dataset.id),
@@ -1684,6 +1722,9 @@ document.addEventListener('change', ev => { const k = ev.target.dataset && ev.ta
 document.addEventListener('keydown', ev => { if (ev.key === 'Escape' && stack.length) closeSheet(); });
 document.addEventListener('input', ev => { const k = ev.target.dataset && ev.target.dataset.lw; if (k != null) { S.lw = S.lw || {}; S.lw[k] = ev.target.value; } });
 document.addEventListener('change', ev => { const k = ev.target.dataset && ev.target.dataset.learn; if (k != null) { S.noLearn = S.noLearn || new Set(); ev.target.checked ? S.noLearn.delete(k) : S.noLearn.add(k); } });
+// the screen always fits the phone: no pinch zoom, no double-tap zoom, no sideways drag (iOS ignores the viewport tag)
+document.addEventListener('gesturestart', ev => ev.preventDefault(), {passive: false});
+document.addEventListener('touchmove', ev => { if (ev.touches.length > 1) ev.preventDefault(); }, {passive: false});
 // Swipe between months (RTL): swipe right = previous month, swipe left = next month.
 let swipe = null;
 document.addEventListener('touchstart', ev => {
@@ -1722,7 +1763,7 @@ window.addEventListener('popstate', () => {
   setTimeout(() => { if (!guardActive) pushGuard(); }, 2200);
 });
 /* =============== installed app: share target + updates =============== */
-const APP_VERSION = '2.2';
+const APP_VERSION = '2.3';
 async function importPendingShare() {
   let c; try { c = await caches.open('shared'); } catch { return; }
   const fr = await c.match('./shared-file'), ir = await c.match('./shared-info');

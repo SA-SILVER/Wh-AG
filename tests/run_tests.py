@@ -190,6 +190,42 @@ def main():
         ev("S.month = '2026-11'; S.rv = 'todo'; ACT.view({dataset: {v: 'review'}})")
         check('review shows what is still waiting for a refund', 'מחכות להחזר' in pg.locator('#app').inner_text())
 
+        print('refund for an expense from before the budget start')
+        imp("\n".join([
+            "15/08/2026, 10:00 - שי: 380 שח עבור קורס עזרה ראשונה, צריך להתקבל החזר",
+            "12/10/2026, 09:00 - שי: התקבל 380 החזר",
+        ]))
+        pre = ev("() => { const t = chatTx(D.chat.find(i => /380 החזר/.test(i.text))); return {amount: t.amount, cat: t.cat, rfPre: t.rfPre, pending: t.pending, inPend: pendingChat().some(x => x.id === t.id), inChat: D.chat.some(i => /קורס/.test(i.text))}; }")
+        check('expense before the start is not counted, but kept aside', not pre['inChat'] and ev("(D.rfPre || []).length") == 1, pre)
+        check('the refund is tied to it and asks for the expense section (not income)', pre['rfPre'] and pre['pending'] and pre['inPend'], pre)
+        ev("() => { const g = pendGroups().find(g => g.items.some(t => t.rfPre)); groupPick(g.key, 'c3'); }")
+        pre = ev("() => { const t = chatTx(D.chat.find(i => /380 החזר/.test(i.text))); const e = D.rfPre[0]; return {amount: t.amount, cat: t.cat, expCat: (D.ov[e.id] || {}).cat}; }")
+        check('…then it comes off that expense section as a minus', pre['amount'] == -380 and pre['cat'] == 'c3' and pre['expCat'] == 'c3', pre)
+        check('…and is not in the Excel export of the month before the start', ev("monthTx('2026-08').length") == 0)
+
+        print('home squares')
+        ev("S.month = '2026-11'; ACT.view({dataset: {v: 'home'}})")
+        pg.locator('[data-act=incdet]').click(); pg.wait_for_timeout(300)
+        stxt = pg.locator('.sheet').last.inner_text() if pg.locator('.sheet').count() else ''
+        check('tapping "הכנסות" opens the income detail', 'הכנסות –' in stxt and 'משכורת' in stxt, stxt[:200])
+        ev("stack.slice().forEach(e => closeSheet(e))"); pg.wait_for_timeout(250)
+        ev("S.month = '2026-10'; ACT.view({dataset: {v: 'home'}})")
+        pg.locator('.kpi [data-rv=fixed]').click(); pg.wait_for_timeout(250)
+        check('tapping "מתוכן קבועות" goes to the fixed charges', ev("S.view") == 'review' and ev("S.rv") == 'fixed')
+
+        print('fits the phone')
+        vp = pg.locator('meta[name=viewport]').get_attribute('content')
+        check('zoom is turned off', 'user-scalable=no' in vp and 'maximum-scale=1' in vp, vp)
+        pg.set_viewport_size({'width': 360, 'height': 760})
+        wide = ev("""async () => { const out = []; const chk = n => { const w = document.documentElement.scrollWidth; if (w > innerWidth) out.push(n + ':' + w); };
+            for (const m of ['2026-09', '2026-10', '2026-11']) for (const v of ['home', 'data', 'review']) { S.month = m; S.rv = 'todo'; ACT.view({dataset: {v}}); chk(v + m); }
+            S.rv = 'fixed'; render(); chk('fixed');
+            S.month = '2026-11'; ACT.view({dataset: {v: 'home'}}); incDetailSheet(); await new Promise(r => setTimeout(r, 300)); chk('incdet');
+            stack.slice().forEach(e => closeSheet(e)); txSheet(D.chat.find(i => i.incoming).id); await new Promise(r => setTimeout(r, 300)); chk('tx');
+            stack.slice().forEach(e => closeSheet(e)); return out; }""")
+        check('no screen is wider than a 360px phone', not wide, wide)
+        pg.set_viewport_size({'width': 390, 'height': 844})
+
         print('screens render without errors')
         for v in ['home', 'data', 'review']:
             ev(f"ACT.view({{dataset: {{v: '{v}'}}}})")
