@@ -645,10 +645,13 @@ function render() {
   const app = $('#app'), nav = $('#nav');
   if (!D) {
     nav.hidden = true;
+    if (S.keep === undefined) { S.keep = null; keepInfo().then(k => { S.keep = k; if (k && !D) render(); }); }
     app.innerHTML = `<div class="empty" style="padding-top:70px">${I.flower}<h2>איפה <span class="script">הכסף</span></h2>
       ${S.pendingShare ? `<div class="banner" style="max-width:340px;margin:12px auto"><span>💬 יש צ'אט ששותף מווטסאפ ומחכה. קודם משחזרים מגיבוי – והוא ייובא מיד אחר כך.</span></div>` : ''}
       <p style="line-height:1.6">פעם ראשונה כאן? קודם <b>שחזור מגיבוי</b> של האפליקציה הקודמת – כך חוזרים הסעיפים, מילות המפתח וכל הנתונים.<br>אחר כך: בקבוצה ← ⋮ ← עוד ← <b>ייצוא צ'אט</b> ← ללא מדיה ← <b>איפה הכסף</b>.</p>
       <button class="primary" data-act="restore" style="max-width:300px;margin:20px auto 0">שחזור מגיבוי</button>
+      ${S.keep ? `<button class="ghost" data-act="keep-restore" style="max-width:300px;margin:10px auto 0">החזרת הגדרות הסעיפים ששמרת (${new Date(S.keep.at).toLocaleDateString('he-IL')})</button>` : ''}
+      <button class="ghost" data-act="restore-settings" style="max-width:300px;margin:10px auto 0">רק הגדרות הסעיפים מקובץ גיבוי</button>
       <button class="ghost" data-act="${S.pendingShare ? 'share-now' : 'import'}" style="max-width:300px;margin:10px auto 0">${S.pendingShare ? 'לייבא בלי גיבוי' : 'ייבוא צ\'אט מקובץ'}</button>
       <p class="note" style="margin-top:22px">🔒 הכל נשמר רק בטלפון הזה. האפליקציה חסומה לאינטרנט – היא לא יכולה לשלוח שום דבר לשום מקום.</p></div>`;
     return;
@@ -1624,6 +1627,7 @@ async function restore(file) {
   try { o = JSON.parse(await file.text()); } catch { return toast('זה לא קובץ גיבוי של האפליקציה', 4000); }
   const go = d => {
     if (!d || !d.cfg || !Array.isArray(d.chat)) return toast('זה לא קובץ גיבוי של האפליקציה', 4000);
+    if (S.restoreMode === 'settings') { S.restoreMode = ''; return applySettings(settingsOf(d)); }   // sections, keywords, settings – no amounts
     confirmRestore(d, file);
   };
   if (o && o.kesefBackup && o.enc) {
@@ -1652,10 +1656,41 @@ async function unRestore() {
   let s; try { s = JSON.parse(await IDB.get('snap')); } catch {} if (!s) return toast('אין מצב קודם לחזור אליו');
   D = JSON.parse(s.json); save(false); await IDB.del('snap'); stack.slice().forEach(e => closeSheet(e)); render(); toast('חזרת למצב שלפני השחזור ✓', 4000);
 }
+// ---- keeping the section settings through a wipe ----
+// Only settings, never amounts: groups and sections (without expected-income amounts), keywords, payment methods,
+// people and import settings. Encrypted with a password the user chooses (AES-GCM, key from PBKDF2), kept only on this phone.
+function settingsOf(d) {
+  const c = d.cfg || {};
+  return {v: 1, cfg: {groups: c.groups || [], cats: (c.cats || []).map(x => ({...x, budget: 0})), pays: c.pays || [], people: c.people || [], me: c.me || '',
+    senders: c.senders || {}, defPay: c.defPay || {}, start: c.start || '', dateOrder: c.dateOrder || 'auto'}, kw: d.kw || [], guideSeen: !!(d.meta && d.meta.guideSeen)};
+}
+function applySettings(s) {
+  D = blank(); D.cfg = {...D.cfg, ...s.cfg}; D.kw = s.kw || []; D.meta.guideSeen = !!s.guideSeen;
+  save(false); stack.slice().forEach(e => closeSheet(e)); render();
+  toast(`חזרו ${D.cfg.cats.length} סעיפים ו-${D.kw.length} מילות מפתח. עכשיו מייבאים את הצ'אט`, 5000);
+}
+async function keepInfo() { try { const k = await IDB.get('keep'); return k ? {at: JSON.parse(k).at} : null; } catch { return null; } }
+function restoreKept() {
+  askPassword('סיסמת ההגדרות השמורות', false, async pw => {
+    try { const k = JSON.parse(await IDB.get('keep')); const s = JSON.parse(await decryptText(k.enc, pw)); await IDB.del('keep'); applySettings(s); }
+    catch { toast('סיסמה שגויה', 4000); }
+  });
+}
 function wipeSheet() {
-  openSheet(() => `${head('מחיקת כל הנתונים')}<p>זה מוחק מהטלפון את כל ההוצאות, ההגדרות, התקציבים והתנועות הקבועות. אי אפשר לבטל.</p>
-    <button class="ghost" data-act="backup">קודם ליצור גיבוי</button><button class="primary" id="w-go" style="background:var(--red)">למחוק הכל</button>`, {
-    mount(sh) { sh.addEventListener('click', ev => { if (!ev.target.closest('#w-go')) return; wipeStore(); fsSet(null); L = {}; D = null; stack.slice().forEach(e => closeSheet(e)); render(); toast('הכל נמחק'); }); }
+  openSheet(() => `${head('מחיקת הנתונים מהטלפון')}
+    <p>זה מוחק מהטלפון את כל ההוצאות, הרישומים הידניים, התיקונים, התנועות הקבועות וההכנסות הצפויות. אי אפשר לבטל.</p>
+    <label class="field" style="display:flex;gap:10px;align-items:flex-start;line-height:1.5"><input type="checkbox" id="w-keep" checked style="margin-top:4px"> <span>לשמור את הגדרות הסעיפים, כדי שיהיה אפשר להחזיר אותן אחרי המחיקה: סעיפים וקבוצות, מילות מפתח, אמצעי תשלום והגדרות ייבוא – בלי שום סכום. נשמרות רק בטלפון הזה, מוצפנות בסיסמה שתבחר עכשיו.</span></label>
+    <button class="ghost" data-act="backup">קודם ליצור גיבוי</button><button class="primary" id="w-go" style="background:var(--red)">למחוק</button>`, {
+    mount(sh) { sh.addEventListener('click', ev => { if (!ev.target.closest('#w-go')) return;
+      const done = () => { wipeStore(); fsSet(null); L = {}; D = null; S.keep = undefined; stack.slice().forEach(e => closeSheet(e)); render(); };
+      if (!$('#w-keep', sh).checked) { IDB.del('keep').catch(() => {}); done(); return toast('הכל נמחק'); }
+      const s = settingsOf(D);
+      askPassword('סיסמה להגדרות השמורות', true, async pw => {
+        try { await IDB.put('keep', JSON.stringify({at: Date.now(), enc: JSON.parse(await encryptText(JSON.stringify(s), pw))})); }
+        catch { return toast('לא הצלחתי לשמור את ההגדרות – לא נמחק כלום', 5000); }
+        done(); toast('הנתונים נמחקו. ההגדרות נשמרו מוצפנות – אפשר להחזיר אותן במסך הפתיחה', 6000);
+      });
+    }); }
   });
 }
 
@@ -1725,7 +1760,9 @@ const ACT = {
   'go-review': () => ACT.view({dataset: {v: 'review'}}),
   month: el => { S.month = addM(S.month, +el.dataset.k); render(); },
   import: () => $('#f-chat').click(),
-  restore: () => $('#f-restore').click(),
+  restore: () => { S.restoreMode = ''; $('#f-restore').click(); },
+  'restore-settings': () => { S.restoreMode = 'settings'; $('#f-restore').click(); },
+  'keep-restore': () => restoreKept(),
   backup: () => backupSheet(),
   wipe: () => wipeSheet(),
   add: () => openSheet(() => `${head('מה לעשות?')}<div class="actlist">
@@ -1863,7 +1900,7 @@ window.addEventListener('popstate', () => {
   setTimeout(() => { if (!guardActive) pushGuard(); }, 2200);
 });
 /* =============== installed app: share target + updates =============== */
-const APP_VERSION = '3.2';
+const APP_VERSION = '3.3';
 async function importPendingShare() {
   let c; try { c = await caches.open('shared'); } catch { return; }
   const fr = await c.match('./shared-file'), ir = await c.match('./shared-info');
@@ -2013,7 +2050,7 @@ function forgotPin() {
     if (!w.dataset.sure) { w.dataset.sure = 1; w.textContent = 'בטוח? לחיצה נוספת מוחקת הכל'; return; }
     wipeStore();
     L = {}; D = null; locked = false; document.body.classList.remove('locked', 'cover');
-    document.querySelectorAll('.lock').forEach(x => x.remove()); render(); toast('הנתונים נמחקו – אפשר לשחזר מגיבוי', 4000);
+    document.querySelectorAll('.lock').forEach(x => x.remove()); S.keep = undefined; render(); toast('הנתונים נמחקו – אפשר לשחזר מגיבוי, או רק את הגדרות הסעיפים מקובץ הגיבוי', 5000);
   });
   document.body.appendChild(el);
 }

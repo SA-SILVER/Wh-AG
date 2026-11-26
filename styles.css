@@ -61,6 +61,7 @@ h1.hero{font-size:27px;line-height:1.25;text-align:center;margin:16px 6px 18px;f
 .cc.mini{padding:12px} .cc.mini .h{font-size:13.5px}
 .arrow{color:var(--ink);opacity:.8}
 nav.bottom{position:fixed;bottom:14px;left:50%;transform:translateX(-50%);z-index:20;display:flex;align-items:center;gap:10px}
+nav.bottom[hidden]{display:none}
 nav .tabs{display:flex;background:rgba(255,253,249,.94);border-radius:999px;box-shadow:0 8px 30px rgba(60,40,10,.15);padding:6px}
 nav .tabs button{display:flex;flex-direction:column;align-items:center;gap:2px;padding:7px 16px;border-radius:999px;font-size:12px;font-weight:600;position:relative;color:var(--ink)}
 nav .tabs button.on{background:#fff;color:var(--blue);box-shadow:0 2px 10px rgba(54,81,245,.15)}
