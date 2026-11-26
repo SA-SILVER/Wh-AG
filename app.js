@@ -398,8 +398,8 @@ function openIncome(m) { const l = monthTx(m); return l.filter(t => t.src === 'i
 function openMonths() { const out = []; for (let m = minMonth(); m <= curMonth(); m = addM(m, 1)) if (!isClosed(m)) out.push(m); return out; }
 function openMonthsNote() {
   const om = openMonths(); if (!om.length) return '';
-  return `<div class="card opennote"><b>${om.length === 1 ? 'חודש שעוד לא נסגר באקסל' : 'חודשים שעוד לא נסגרו באקסל'}: ${om.map(sheetName).join(', ')}</b>
-    <p>הוצאות קבועות והכנסות בחודשים האלה נספרות לפי הצפי, ולא צריך לאשר אותן כאן אחת־אחת. כשסוגרים חודש באקסל וטוענים את הקובץ לאפליקציה, הסכומים מתעדכנים לסכומים המדויקים.</p></div>`;
+  return info(`${om.length === 1 ? 'חודש שעוד לא נסגר באקסל' : 'חודשים שעוד לא נסגרו באקסל'}: ${om.map(sheetName).join(', ')}`,
+    'הוצאות קבועות והכנסות בחודשים האלה נספרות לפי הצפי, ולא צריך לאשר אותן כאן אחת־אחת. כשסוגרים חודש באקסל וטוענים את הקובץ לאפליקציה, הסכומים מתעדכנים לסכומים המדויקים.');
 }
 function dueFixed() { const out = []; for (const m of reviewMonths()) out.push(...openFixed(m).filter(f => f.date <= todayStr()), ...openIncome(m)); return out; }
 function entryByKey(k) {
@@ -407,7 +407,10 @@ function entryByKey(k) {
   if (k.startsWith('inc:')) return monthTx(m).find(t => t.key === k) || (() => { const c = catById(k.slice(4).split('|')[0]); return {key: k, amount: num(c && c.budget), cat: c && c.id}; })();
   const fid = k.split('|')[0]; return fixedFor(m).find(x => x.fid === fid);
 }
-function reviewCount() { return pendingChat().length + rfAsks().length + multiNums().length + dupPairs().length + ((D.meta.fxAsk || []).length) + ((D.meta.fxChanges || []).length ? 1 : 0); }
+// how many decisions wait in "לטיפול": lines with the same description count once (one choice sorts them all),
+// a line with several numbers is one card (amount first, then section), and expenses that only wait for a refund are not a task.
+// The badge on the tab and the number on the "לטיפול" button are this same number.
+function reviewCount() { return pendGroups().length + rfAsks().length + multiNums().filter(t => !t.pending).length + dupPairs().length + ((D.meta.fxAsk || []).length) + ((D.meta.fxChanges || []).length ? 1 : 0); }
 
 const SKIP = '__skip';
 const kwCatName = c => c === SKIP ? 'לא לייבא' : (catById(c) ? catById(c).name : '?');
@@ -448,6 +451,11 @@ function firstNumber(msg) {
   else if (/,\d{1,2}$/.test(s)) s = s.replace(/,(\d{1,2})$/, '.$1').replace(/,/g, ''); // 17,5 → 17.5
   else s = s.replace(/,/g, '');
   return {value: parseFloat(s), index: m.index, len: m[0].length};
+}
+function msgNums(msg) {
+  const out = [];
+  for (const m of String(msg || '').matchAll(/\d+(?:,\d{3})*(?:[.,]\d+)?/g)) { const n = firstNumber(m[0]); if (n && n.value > 0 && !out.includes(n.value)) out.push(n.value); }
+  return out;
 }
 // Cards are told apart by company: "אשראי דני כאל", "אשראי דני ישראכרט"… A new card written in the group is added to the list by itself.
 const CARD_CO = ['כאל', 'ישראכרט', 'מקס', 'max', 'לאומי קארד', 'לאומיקארד', 'אמקס', 'אמריקן אקספרס', 'דיינרס', 'ויזה', 'visa', 'מאסטרקארד', 'פועלים', 'דיסקונט', 'מזרחי', 'בינלאומי', 'וואן זירו', 'one zero', 'פלוס', 'כאל פלוס'];
@@ -648,7 +656,7 @@ function render() {
     if (S.keep === undefined) { S.keep = null; keepInfo().then(k => { S.keep = k; if (k && !D) render(); }); }
     app.innerHTML = `<div class="empty" style="padding-top:70px">${I.flower}<h2>איפה <span class="script">הכסף</span></h2>
       ${S.pendingShare ? `<div class="banner" style="max-width:340px;margin:12px auto"><span>💬 יש צ'אט ששותף מווטסאפ ומחכה. קודם משחזרים מגיבוי – והוא ייובא מיד אחר כך.</span></div>` : ''}
-      <p style="line-height:1.6">פעם ראשונה כאן? קודם <b>שחזור מגיבוי</b> של האפליקציה הקודמת – כך חוזרים הסעיפים, מילות המפתח וכל הנתונים.<br>אחר כך: בקבוצה ← ⋮ ← עוד ← <b>ייצוא צ'אט</b> ← ללא מדיה ← <b>איפה הכסף</b>.</p>
+      <p style="line-height:1.6">יש קובץ גיבוי? <b>שחזור מגיבוי</b> מחזיר את הסעיפים, מילות המפתח וכל הנתונים.<br>כדי לקלוט הוצאות: בקבוצה ← ⋮ ← עוד ← <b>ייצוא צ'אט</b> ← ללא מדיה ← <b>איפה הכסף</b>.</p>
       <button class="primary" data-act="restore" style="max-width:300px;margin:20px auto 0">שחזור מגיבוי</button>
       ${S.keep ? `<button class="ghost" data-act="keep-restore" style="max-width:300px;margin:10px auto 0">החזרת הגדרות הסעיפים ששמרת (${new Date(S.keep.at).toLocaleDateString('he-IL')})</button>` : ''}
       <button class="ghost" data-act="restore-settings" style="max-width:300px;margin:10px auto 0">רק הגדרות הסעיפים מקובץ גיבוי</button>
@@ -680,7 +688,7 @@ function navHtml() {
   const n = reviewCount();
   const b = (v, ic, t, extra = '') => `<button class="${S.view === v ? 'on' : ''}" data-act="view" data-v="${v}">${ic}<span>${t}</span>${extra}</button>`;
   return `<div class="tabs">${b('home', I.home, 'בית')}${b('data', I.flow, 'פירוט')}${b('review', I.check, 'לבדיקה', n ? `<span class="dot">${n}</span>` : '')}</div>
-    <button class="fab" data-act="add" aria-label="הוספה">${I.plus}</button>`;
+    <button class="fab" data-act="add" aria-label="הוספה ידנית">${I.plus}</button>`;
 }
 
 /* ---- dashboard ---- */
@@ -743,7 +751,8 @@ function viewHome() {
   return `<h1 class="hero">${hero}</h1>
     ${d.closed ? `<div style="text-align:center;margin:-8px 0 12px"><span class="tag ok">✓ מדויק – לפי האקסל (נסגר)</span></div>` : ''}
     ${days >= 7 && !S.dismissed.has('bk') ? `<button class="banner" data-act="backup" style="background:#FDEAF1"><span>💾 יש שינויים שלא גובו כבר ${days} ימים</span><b>לגבות ←</b></button>` : ''}
-    ${pAll && !d.closed ? `<button class="banner" data-act="view" data-v="review"><span>${d.md.pend ? `${d.md.pend === 1 ? 'שורה אחת' : d.md.pend + ' שורות'} ב${mName(S.month)}${pAll > d.md.pend ? ` (${pAll} בסך הכל)` : ''}` : `${pAll === 1 ? 'שורה אחת' : pAll + ' שורות'} מחודשים אחרים`} עוד בלי סעיף, ולא נספרות</span><b>לסדר ←</b></button>` : ''}
+    ${staleBanner(cur)}
+    ${pAll && !d.closed ? `<button class="banner" data-act="view" data-v="review" data-rv="todo"><span>${d.md.pend ? `${d.md.pend === 1 ? 'שורה אחת' : d.md.pend + ' שורות'} ב${mName(S.month)}${pAll > d.md.pend ? ` (${pAll} בסך הכל)` : ''}` : `${pAll === 1 ? 'שורה אחת' : pAll + ' שורות'} מחודשים אחרים`} עוד בלי סעיף, ולא נספרות</span><b>לסדר ←</b></button>` : ''}
     <div class="stat kpi">
       <div data-act="incdet"><span>הכנסות</span><b>${fmt(d.incExp, 0)}</b><span>${d.incIn < d.incExp ? `נכנס ${fmt(d.incIn, 0)}` : d.incExp ? 'הכל נכנס' : '—'}</span></div>
       ${past ? `<div data-act="view" data-v="review" data-rv="fixed"><span>מתוכן קבועות</span><b>${fmt(fxTot, 0)}</b><span>משכנתא, הו"ק וכד'</span></div>`
@@ -757,22 +766,39 @@ function viewHome() {
       return `<button class="catrow withicon" data-act="grp" data-id="${g.id}"><span class="gicon" style="background:${gs.bg}">${gs.icon}</span><div class="body"><div class="t"><b>${esc(g.name)}</b><b>${ils(v, 0)}</b></div>
         <div class="bar"><i style="width:${v / mx * 100}%;background:${gs.bar}"></i></div>
         <div class="foot"><span>${d.total ? Math.round(v / d.total * 100) : 0}% מההוצאות</span><span style="color:var(--muted)">${pv ? `${df >= 0 ? '▲' : '▼'} ${fmt(Math.abs(df), 0)} ${vsTxt}` : ''}</span></div></div></button>`; }).join('') : '<p class="note" style="text-align:center">אין עדיין הוצאות בחודש הזה</p>'}</div>
-    ${big.length ? `<div class="label">ההוצאות הגדולות החודש</div><div class="card" style="padding:4px 14px">${big.map(t => txLine(t)).join('')}</div>` : ''}
+    ${big.length ? `<div class="label">ההוצאות הגדולות החודש</div><div class="card" style="padding:4px 14px">${big.map(t => txLine(t, {compact: true, date: true})).join('')}</div>` : ''}
     ${payCard(d.md)}
     ${tr.length > 1 ? `<div class="label">${tr.length === 6 ? 'חצי שנה אחרונה' : 'מתחילת התקציב'}</div>
     <div class="card"><div style="display:flex;align-items:flex-end;gap:8px;height:150px">${tr.map(x => `<button data-act="goto" data-m="${x.m}" style="flex:1;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;height:100%">
-        <div style="display:flex;gap:3px;align-items:flex-end;height:110px"><div style="width:12px;border-radius:5px;background:var(--green);height:${Math.max(2, x.i / tmx * 110)}px"></div><div style="width:12px;border-radius:5px;background:${x.m === S.month ? 'var(--blue)' : 'var(--blue-soft)'};height:${Math.max(2, x.e / tmx * 110)}px${x.m === curMonth() ? ';opacity:.55' : ''}"></div></div>
+        <div style="display:flex;gap:3px;align-items:flex-end;height:110px"><div style="width:12px;border-radius:5px;background:${x.m === S.month ? CH.inc : CH.incSoft};height:${Math.max(2, x.i / tmx * 110)}px"></div><div style="width:12px;border-radius:5px;background:${x.m === S.month ? CH.exp : CH.expSoft};height:${Math.max(2, x.e / tmx * 110)}px"></div></div>
         <div style="font-size:12px;color:var(--muted);margin-top:4px;line-height:1.2">${sheetName(x.m)}${x.m === curMonth() ? '<br><span style="font-size:11px">עד היום</span>' : ''}</div></button>`).join('')}</div>
-      <div class="foot" style="margin-top:8px;justify-content:center;gap:16px"><span><span class="pdotx" style="background:var(--green)"></span> הכנסות</span><span><span class="pdotx" style="background:var(--blue)"></span> הוצאות</span></div></div>` : ''}`;
+      <div class="foot" style="margin-top:8px;justify-content:center;gap:16px"><span><span class="pdotx" style="background:${CH.inc}"></span> הכנסות</span><span><span class="pdotx" style="background:${CH.exp}"></span> הוצאות</span></div></div>` : ''}`;
 }
-// fixed charges without a payment method are shown as their own line, not as "לא צוין"
+// days since the last import from the group (by when it was imported, not by the last message)
+const importAge = () => { const li = D.meta.lastImport; return li && li.at ? Math.floor((Date.now() - li.at) / 864e5) : null; };
+function staleBanner(cur) {
+  if (!cur || S.dismissed.has('stale')) return '';
+  const a = importAge();
+  if (a !== null && a < 3) return '';
+  return `<button class="banner stale" data-act="stale"><span>💬 ${a === null ? 'עוד לא יובא צ\'אט מהקבוצה' : `הייבוא האחרון מהקבוצה היה לפני ${a} ימים – המספרים לא כוללים את מה שנכתב מאז`}</span><b>לעדכן ←</b></button>`;
+}
+function staleSheet() {
+  openSheet(() => `${head('לעדכן מהקבוצה')}
+    <div class="card" style="line-height:1.7">בקבוצה בווטסאפ: <b>⋮</b> ← <b>עוד</b> ← <b>ייצוא צ'אט</b> ← <b>ללא מדיה</b> ← <b>איפה הכסף</b>.<br><span class="note">השיחה נקלטת ישר כאן ולא נשמרת בשום מקום אחר.</span></div>
+    <button class="ghost" data-act="import">יש לי קובץ ייצוא בטלפון – לבחור אותו</button>
+    <button class="ghost" data-act="stale-ok" style="color:var(--muted)">לא עכשיו</button>`);
+}
+// chart colors: the chosen month in full color, the others softer
+const CH = {inc: '#3E9E78', incSoft: '#B9E1CF', exp: '#E07A5F', expSoft: '#F6C4B5'};
+// fixed charges without a payment method are shown as their own line, not as "לא צוין\"
 const payKey = t => t.pay || (t.src === 'fixed' ? 'קבועות (בלי אמצעי תשלום)' : t.src === 'income' ? 'הכנסה צפויה' : 'לא צוין');
 function payCard(md) {
-  const by = {};
-  for (const t of md.list) { if (!isExpT(t)) continue; const p = payKey(t); by[p] = by[p] || {s: 0, n: 0}; by[p].s += t.amount; by[p].n++; }
+  const by = {}; let fxNoPay = 0, fxN = 0;
+  for (const t of md.list) { if (!isExpT(t)) continue; if (!t.pay && t.src === 'fixed') { fxNoPay += t.amount; fxN++; continue; } const p = payKey(t); by[p] = by[p] || {s: 0, n: 0}; by[p].s += t.amount; by[p].n++; }
   const rows = Object.entries(by).sort((a, b) => b[1].s - a[1].s);
-  if (!rows.length) return '';
-  return `<div class="label">הוצאות לפי אמצעי תשלום</div><div class="card" style="padding:4px 14px">${rows.map(([p, v]) => `<button class="txline" data-act="pay" data-p="${esc(p)}" style="align-items:center"><div><b>${esc(p)}</b><div class="d">${v.n} תנועות</div></div><div class="a">${ils(v.s)}</div></button>`).join('')}</div>`;
+  if (!rows.length && !fxN) return '';
+  return `<div class="label">הוצאות לפי אמצעי תשלום</div><div class="card" style="padding:4px 14px">${rows.map(([p, v]) => `<button class="txline" data-act="pay" data-p="${esc(p)}" style="align-items:center"><div><b>${esc(p)}</b><div class="d">${v.n} תנועות</div></div><div class="a">${ils(v.s)}</div></button>`).join('')}
+    ${fxN ? `<button class="txline payfx" data-act="view" data-v="review" data-rv="fixed" style="align-items:center"><div class="d">🔁 קבועות בלי אמצעי תשלום · ${fxN}</div><div class="d">${ils(fxNoPay)}</div></button>` : ''}</div>`;
 }
 
 /* ---- data: every line of the month as a readable list ---- */
@@ -788,64 +814,77 @@ function viewData() {
   if (q) list = list.filter(t => `${t.desc} ${t.text || ''} ${catById(t.cat)?.name || ''} ${t.pay} ${t.note || ''} ${Math.abs(t.amount)} ${t.person || ''}`.toLowerCase().includes(q));
   list = list.slice().sort(f.sort === 'amt' ? (a, b) => Math.abs(b.amount) - Math.abs(a.amount) : (a, b) => b.date.localeCompare(a.date) || String(b.time || '').localeCompare(String(a.time || '')));
   const expSum = sumA(list.filter(isExpT)), incSum = sumA(list.filter(isIncT));
-  const days = []; for (const t of list) { if (!days.length || days[days.length - 1].date !== t.date) days.push({date: t.date, items: []}); days[days.length - 1].items.push(t); }
+  // this month's fixed charges whose day hasn't come yet: in their own block, so the dated list shows only what already happened
+  const upIds = new Set(S.month === curMonth() && f.sort !== 'amt' ? d.upcoming.map(t => t.id) : []);
+  const up = list.filter(t => upIds.has(t.id)), rest = list.filter(t => !upIds.has(t.id));
+  const days = []; for (const t of rest) { if (!days.length || days[days.length - 1].date !== t.date) days.push({date: t.date, items: []}); days[days.length - 1].items.push(t); }
   const pays = [...new Set(d.md.list.map(payKey))];
   const chip = (k, v, label) => `<button class="${f[k] === v ? 'on' : ''}" data-act="f" data-k="${k}" data-v="${esc(v)}">${label}</button>`;
-  const sel = (k, opts, all) => `<select class="inp" data-fsel="${k}" style="padding:9px 12px;font-size:13.5px"><option value="">${all}</option>${opts.map(([v, l]) => `<option value="${esc(v)}" ${f[k] === v ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select>`;
+  const sel = (k, opts, all, label) => `<label class="field fsel"><span>${label}</span><select class="inp" data-fsel="${k}"><option value="">${all}</option>${opts.map(([v, l]) => `<option value="${esc(v)}" ${f[k] === v ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select></label>`;
+  // group, payment method and person sit behind one "סינון" button; the button says how many are on
+  const nOn = ['g', 'pay', 'who'].filter(k => f[k]).length;
   return `<h1 class="hero" style="margin-bottom:10px">כל <span class="script blue">התנועות</span><br>ב${mName(S.month)}</h1>
     <div class="toolbar"><input id="dq" placeholder="חיפוש…" value="${esc(f.q)}"></div>
     <div class="chips" style="margin-bottom:8px">${chip('src', '', 'הכל')}${chip('src', 'chat', '💬 ווטסאפ')}${chip('src', 'fixed', '🔁 קבועות')}${chip('src', 'manual', '✍️ ידני')}${d.md.pend ? chip('src', 'pending', `בלי סעיף (${d.md.pend})`) : ''}</div>
-    <div class="row2" style="grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:10px">${sel('g', D.cfg.groups.map(g => [g.id, g.name]), 'כל הקבוצות')}${sel('pay', pays.map(p => [p, p]), 'כל אמצעי התשלום')}${sel('who', people().map(p => [p, p]), 'כולם')}</div>
-    <div class="card fl-row" style="padding:12px 16px;margin-bottom:10px"><span class="note">${list.length} תנועות</span><span><b>${ils(expSum)}</b> הוצאות${incSum ? ` · <b class="green">${ils(incSum)}</b> הכנסות` : ''}</span></div>
-    <div class="chips" style="margin-bottom:8px">${chip('sort', '', 'לפי תאריך')}${chip('sort', 'amt', 'לפי סכום')}</div>
+    <div class="fbar"><button class="fbtn${nOn ? ' on' : ''}${S.fOpen ? ' open' : ''}" data-act="fopen">סינון${nOn ? ` (${nOn})` : ''} <span>${S.fOpen ? '▴' : '▾'}</span></button>
+      <div class="chips">${chip('sort', '', 'לפי תאריך')}${chip('sort', 'amt', 'לפי סכום')}</div></div>
+    ${S.fOpen ? `<div class="card fpanel">${sel('g', D.cfg.groups.map(g => [g.id, g.name]), 'כל הקבוצות', 'קבוצה')}${sel('pay', pays.map(p => [p, p]), 'כל אמצעי התשלום', 'אמצעי תשלום')}${sel('who', people().map(p => [p, p]), 'כולם', 'מי')}
+      ${nOn ? '<button class="rvskip" data-act="fclear">ניקוי הסינון</button>' : ''}</div>` : ''}
+    <div class="card fl-row" style="padding:12px 16px;margin:10px 0"><span class="note">${list.length} תנועות</span><span><b>${ils(expSum)}</b> הוצאות${incSum ? ` · <b class="green">${ils(incSum)}</b> הכנסות` : ''}</span></div>
     ${!list.length ? '<p class="note" style="text-align:center">אין תנועות</p>' : f.sort === 'amt' ? `<div class="card" style="padding:2px 14px">${list.map(t => txLine(t)).join('')}</div>`
-      : days.map(dy => `<div class="gname" style="display:flex;justify-content:space-between"><span>${dShort(dy.date)}</span><span>${ils(sumA(dy.items.filter(isExpT)))}</span></div><div class="card" style="padding:2px 14px;margin-bottom:6px">${dy.items.map(t => txLine(t, {compact: true})).join('')}</div>`).join('')}`;
+      : `${up.length ? `<div class="gname" style="display:flex;justify-content:space-between"><span>🔁 צפוי בהמשך החודש</span><span>${ils(sumA(up))}</span></div><div class="card upcard" style="padding:2px 14px;margin-bottom:6px">${up.map(t => txLine(t, {compact: true, date: true})).join('')}</div>` : ''}
+        ${days.map(dy => `<div class="gname" style="display:flex;justify-content:space-between"><span>${dShort(dy.date)}</span><span>${ils(sumA(dy.items.filter(isExpT)))}</span></div><div class="card" style="padding:2px 14px;margin-bottom:6px">${dy.items.map(t => txLine(t, {compact: true})).join('')}</div>`).join('')}`}`;
 }
+// "משכנתא · משכנתא": the section is not repeated when the description already says it
+const descCat = (t, c) => { const dsc = String(t.desc || '').trim(); return c && c.name.trim() !== dsc ? `${esc(dsc)}${dsc ? ' · ' : ''}${esc(c.name)}` : esc(dsc || (c ? c.name : '')); };
 function txLine(t, o) {
   o = o && typeof o === 'object' ? o : {};
   const c = catById(t.cat);
   const st = t.src === 'income' ? (t.ok ? '<span class="tag ok">נכנס</span>' : '<span class="tag y">צפוי · לעדכן</span>') : t.src === 'fixed' ? (t.ok ? '<span class="tag ok">ירד</span>' : '<span class="tag y">צפוי</span>') : t.refundExp ? (t.refundDone ? '<span class="tag ok">החזר התקבל</span>' : '<span class="tag y">צפוי החזר</span>') : '';
+  const side = o.compact ? (o.date ? `${dShort(t.date).slice(0, 5)}${t.pay ? '<br>' + esc(t.pay) : ''}` : [esc(t.pay || ''), esc(t.person || '')].filter(Boolean).join(' · '))
+    : `${dShort(t.date)}<br>${esc(t.pay || '')}${t.person ? `<br>${esc(t.person)}` : ''}`;
   return `<button class="txline${o.compact ? ' cmp' : ''}" data-act="tx" data-id="${esc(t.id)}">
     <div><div class="a ${isIncome(c) ? 'green' : ''}">${t.amount < 0 ? '−' : ''}${ils(Math.abs(t.amount))} <span class="src">${SRC_ICON[t.src]}</span> ${st}</div>
-      <div class="d">${esc(t.desc || '')}${c ? ` · ${esc(c.name)}` : ' · <b class="red">בלי סעיף</b>'}${t.note ? `<br>📝 ${esc(t.note)}` : ''}</div></div>
-    <div class="r">${o.compact ? '' : dShort(t.date) + '<br>'}${esc(t.pay || '')}${t.person ? `${o.compact && t.pay ? ' · ' : '<br>'}${esc(t.person)}` : ''}</div>
+      <div class="d">${c ? descCat(t, c) : `${esc(t.desc || '')} · <b class="red">בלי סעיף</b>`}${t.note ? `<br>📝 ${esc(t.note)}` : ''}</div></div>
+    <div class="r">${side}</div>
   </button>`;
 }
 
 /* ---- review ---- */
+// a short explanation that opens on a tap, so the screen stays short once it is familiar
+const info = (title, body) => `<details class="info"><summary>ⓘ ${title}</summary><div>${body}</div></details>`;
 function viewReview() {
-  const pc = pendingChat(), of = [], rf = openRefunds(), dp = dupPairs(), mn = multiNums(), ra = rfAsks();
-  const fa0 = D.meta.fxAsk || [], fc0 = D.meta.fxChanges || [];
-  const todo = pc.length + of.length + rf.length + dp.length + fa0.length + (fc0.length ? 1 : 0) + mn.length + ra.length;
+  const pc = pendingChat(), rf = openRefunds(), dp = dupPairs(), mn = multiNums().filter(t => !t.pending), ra = rfAsks();
+  const fa = D.meta.fxAsk || [], fc = D.meta.fxChanges || [], pg = pendGroups();
+  const todo = reviewCount();
   const seg = `<div class="seg rvseg"><button class="${S.rv !== 'fixed' ? 'on' : ''}" data-act="rvseg" data-v="todo">לטיפול${todo ? ` (${todo})` : ''}</button><button class="${S.rv === 'fixed' ? 'on' : ''}" data-act="rvseg" data-v="fixed">קבועות ${mName(S.month)}</button></div>`;
   if (S.rv === 'fixed') return `<h1 class="hero">הוצאות <span class="script blue">קבועות</span></h1>${seg}${fixedByGroup(S.month)}`;
-  const fa = D.meta.fxAsk || [], fc = D.meta.fxChanges || [];
   const cm = [...new Set([...pc, ...ra].filter(t => isClosed(t.month)).map(t => sheetName(t.month)))];
   return `<h1 class="hero">מה <span class="script blue">לבדוק</span>?</h1>${seg}
-    ${cm.length ? `<div class="card" style="padding:10px 14px;margin-bottom:10px;font-size:13.5px;line-height:1.55">יש כאן שורות של כסף שנכנס מחודשים שכבר נסגרו באקסל (${cm.join(', ')}) – הכלל של ההחזרים שינה אותן אחרי הסגירה. אחרי שבוחרים להן סעיף: ייצוא לאקסל שכולל את החודשים האלה, ובאקסל "ייבוא מאיפה הכסף" – הוא יראה מה עובר ויבקש אישור.</div>` : ''}
-    ${mn.length ? `<div class="label">לבדוק סכום – יש בהודעה יותר ממספר אחד (${mn.length})</div>${mn.map(t => `<div class="card rv"><div class="meta"><span>${dShort(t.date)} ${t.time || ''} · ${esc(t.person || '')}</span><span class="amt">${ils(Math.abs(t.amount))}</span></div>
-        <div class="t">${esc(t.text)}</div>
-        <div class="chips"><button data-act="mn-ok" data-id="${esc(t.id)}">הסכום נכון: ${ils(Math.abs(t.amount))}</button><button data-act="mn-fix" data-id="${esc(t.id)}" style="color:var(--blue);font-weight:600">לתקן סכום</button></div></div>`).join('')}` : ''}
-    ${fa.length ? `<div class="label">זה אותו חיוב? (${fa.length})</div>${fa.map(a => { const f = D.fixed.find(x => x.id === a.fid) || {}; return `<div class="card rv">
-        <div class="t">מהאקסל: <b>${esc(a.name)}</b> – ${ils(a.amount)} (${esc(FX_TYPE[a.type] || a.type)})<br>תנועה קבועה שהגדרת: <b>${esc(f.name || '')}</b> – ${ils(num(f.amount))}</div>
-        <div class="chips"><button data-act="fxa-yes" data-k="${esc(a.key)}">כן, אותו חיוב – לחבר</button><button data-act="fxa-no" data-k="${esc(a.key)}" style="color:var(--muted)">לא, חיוב אחר</button></div></div>`; }).join('')}` : ''}
-    ${fc.length ? `<div class="label">מה השתנה בחיובים הקבועים</div><div class="card">${fc.map(x => `<div class="note" style="margin:4px 0">${fxChangeLine(x)}</div>`).join('')}
-        <div class="chips" style="margin-top:6px"><button data-act="fxc-seen">ראיתי</button><button data-act="fixed" style="color:var(--blue)">לרשימת הקבועות</button></div></div>` : ''}
-    ${dp.length ? `<div class="label">אולי נרשם פעמיים? (${dp.length})</div>${dp.map(([a, b]) => `<div class="card rv"><div class="meta"><span>${dShort(a.date)}</span><span class="amt">${ils(Math.abs(a.amount))}</span></div>
-        <div class="t">• ${esc(a.person)}: ${esc(a.text)}<br>• ${esc(b.person)}: ${esc(b.text)}</div>
-        <div class="chips"><button data-act="dup-skip" data-id="${esc(b.id)}">זה כפול – לספור פעם אחת</button><button data-act="dup-ok" data-a="${esc(a.id)}" data-b="${esc(b.id)}" style="color:var(--muted)">שתי הוצאות שונות</button></div></div>`).join('')}` : ''}
+    ${pc.length ? `<div class="label">לבחור סעיף (${pg.length < pc.length ? `${pc.length} שורות, ${pg.length} בחירות` : pc.length})</div>
+      ${cm.length ? info(`שורות מחודשים שכבר נסגרו (${cm.join(', ')})`, 'אלה שורות של כסף שנכנס, שהכלל של ההחזרים שינה אחרי שהחודש נסגר באקסל. אחרי שבוחרים להן סעיף: ייצוא לאקסל שכולל את החודשים האלה, ובאקסל "ייבוא מאיפה הכסף" – הוא יראה מה עובר ויבקש אישור.') : ''}
+      ${pg.map(rvGroup).join('')}` : ''}
     ${ra.length ? `<div class="label">על איזו הוצאה ההחזר? (${ra.length})</div>${ra.map(t => `<div class="card rv"><div class="meta"><span>${dShort(t.date)} ${t.time || ''} · ${esc(t.person || '')}${closedTag(t)}</span><span class="amt green">${t.noAmt ? 'בלי סכום' : '+' + ils(Math.abs(t.amount))}</span></div>
         <div class="t">${esc(t.text)}</div>
         ${!t.rfAsk.length ? `<p class="note" style="margin:4px 0">${t.noAmt ? 'אין סכום בהודעה, ולא נמצאה הוצאה שמחכה להחזר – בחרו סעיף, ואז כמה התקבל.' : 'לא נמצאה הוצאה שמחכה להחזר.'}</p>` : t.noAmt ? '<p class="note" style="margin:4px 0">אין סכום בהודעה – הסכום יהיה מה שההוצאה עוד מחכה לו (אפשר לתקן אחר כך).</p>' : ''}
         <div class="chips">${t.rfAsk.map(e => `<button data-act="rf-link" data-id="${esc(t.id)}" data-e="${esc(e)}">${esc(rfLabel(e))}</button>`).join('')}
-          ${incCats().map(c => `<button data-act="rf-inc" data-id="${esc(t.id)}" data-c="${esc(c.id)}" class="incchip">+ ${esc(c.name)}</button>`).join('')}
-          <button data-act="rf-none" data-id="${esc(t.id)}" style="color:var(--muted)">${t.rfAsk.length ? 'לא קשור להוצאה – ' : ''}לבחור סעיף</button>
-          ${t.noAmt ? `<button data-act="rf-skip" data-id="${esc(t.id)}" style="color:var(--muted)">להתעלם (לא כסף)</button>` : ''}</div></div>`).join('')}` : ''}
-    ${pc.length ? `<div class="label">לבחור סעיף (${pc.length}${pendGroups().length < pc.length ? ` שורות ב-${pendGroups().length} קבוצות` : ''})</div>${pendGroups().map(rvGroup).join('')}` : ''}
+          ${incCats().slice(0, 2).map(c => `<button data-act="rf-inc" data-id="${esc(t.id)}" data-c="${esc(c.id)}" class="incchip">+ ${esc(c.name)}</button>`).join('')}
+          <button data-act="rf-none" data-id="${esc(t.id)}" class="more">${t.rfAsk.length ? 'לא קשור – ' : ''}סעיף אחר…</button></div>
+        ${t.noAmt ? `<div class="rvfoot"><span></span><button data-act="rf-skip" data-id="${esc(t.id)}" class="rvskip">להתעלם (לא כסף)</button></div>` : ''}</div>`).join('')}` : ''}
+    ${mn.length ? `<div class="label">לבדוק סכום – יש בהודעה יותר ממספר אחד (${mn.length})</div>${mn.map(t => `<div class="card rv"><div class="meta"><span>${dShort(t.date)} ${t.time || ''} · ${esc(t.person || '')}</span><span>${esc((catById(t.cat) || {}).name || '')}</span></div>
+        <div class="t">${esc(t.text)}</div><div class="rvq">מה הסכום?</div>${amountChips(t)}</div>`).join('')}` : ''}
+    ${dp.length ? `<div class="label">אולי נרשם פעמיים? (${dp.length})</div>${dp.map(([a, b]) => `<div class="card rv"><div class="meta"><span>${dShort(a.date)}</span><span class="amt">${ils(Math.abs(a.amount))}</span></div>
+        <div class="t">• ${esc(a.person)}: ${esc(a.text)}<br>• ${esc(b.person)}: ${esc(b.text)}</div>
+        <div class="chips"><button data-act="dup-skip" data-id="${esc(b.id)}">זה כפול – לספור פעם אחת</button><button data-act="dup-ok" data-a="${esc(a.id)}" data-b="${esc(b.id)}" class="more">שתי הוצאות שונות</button></div></div>`).join('')}` : ''}
+    ${fa.length ? `<div class="label">זה אותו חיוב? (${fa.length})</div>${fa.map(a => { const f = D.fixed.find(x => x.id === a.fid) || {}; return `<div class="card rv">
+        <div class="t">מהאקסל: <b>${esc(a.name)}</b> – ${ils(a.amount)} (${esc(FX_TYPE[a.type] || a.type)})<br>תנועה קבועה שהגדרת: <b>${esc(f.name || '')}</b> – ${ils(num(f.amount))}</div>
+        <div class="chips"><button data-act="fxa-yes" data-k="${esc(a.key)}">כן, אותו חיוב – לחבר</button><button data-act="fxa-no" data-k="${esc(a.key)}" class="more">לא, חיוב אחר</button></div></div>`; }).join('')}` : ''}
+    ${fc.length ? `<div class="label">מה השתנה בחיובים הקבועים</div><div class="card">${fc.map(x => `<div class="note" style="margin:4px 0">${fxChangeLine(x)}</div>`).join('')}
+        <div class="chips" style="margin-top:6px"><button data-act="fxc-seen">ראיתי</button><button data-act="fixed" class="more">לרשימת הקבועות</button></div></div>` : ''}
+    ${!todo ? `<div class="empty">${I.flower}<h2>הכל <span class="script">מסודר</span></h2><p class="note">אין כרגע מה לבדוק.</p><button class="ghost" data-act="rvseg" data-v="fixed" style="max-width:280px;margin:8px auto 0">לקבועות של ${mName(S.month)}</button></div>` : ''}
     ${rf.length ? `<div class="label">מחכות להחזר (${rf.length})</div><div class="card">${rf.map(t => `<div class="txline" style="align-items:center"><div><div class="a">${ils(t.refundAmt || t.amount)}${t.refundGot ? ` <span class="note">· חזרו ${ils(t.refundGot)}</span>` : ''}</div><div class="d">${esc(t.text)} · ${dShort(t.date)}</div></div>
         <button class="smallbtn" data-act="rf-done" data-id="${esc(t.id)}">התקבל ✓</button></div>`).join('')}</div>
-        <p class="note" style="margin:6px">כשהחזר נכנס, כותבים אותו בקבוצה ("התקבל 445 החזר"). הוא מתחבר לבד להוצאה ויורד ממנה כמינוס, גם אם הגיע בכמה הודעות. כשחוזר כמעט כל הסכום ההוצאה נסגרת לבד; כאן מסמנים רק החזר חלקי שלא יגיע ממנו יותר.</p>` : ''}
-    ${!todo ? `<div class="empty">${I.flower}<h2>הכל <span class="script">מסודר</span></h2><p class="note">אין כרגע מה לבדוק.</p><button class="ghost" data-act="rvseg" data-v="fixed" style="max-width:280px;margin:8px auto 0">לקבועות של ${mName(S.month)}</button></div>` : ''}
+        ${info('איך החזר נסגר', 'כשהחזר נכנס, כותבים אותו בקבוצה ("התקבל 445 החזר"). הוא מתחבר לבד להוצאה ויורד ממנה כמינוס, גם אם הגיע בכמה הודעות. כשחוזר כמעט כל הסכום ההוצאה נסגרת לבד; כאן מסמנים רק החזר חלקי שלא יגיע ממנו יותר.')}` : ''}
     ${openMonthsNote()}`;
 }
 // every fixed expense of the month, grouped by category (group).
@@ -887,14 +926,14 @@ function fixedByGroup(m) {
       ${sumRow('עוד צפוי לרדת החודש', sExp, '#8FB6E3')}
       <div class="fxs-row tot"><span>סה"כ קבועות ב${mName(m)}</span><b>${ils(sWent + sExp, 0)}</b></div>`}
     </div>
-    ${closed ? '' : `<p class="note" style="margin:0 8px 6px">החודש עוד לא נסגר באקסל: חיוב שהיום שלו עבר נספר כאילו ירד ("לפי הצפי"), והסכומים יתעדכנו לבד כשהחודש ייסגר.</p>`}
+    ${closed ? '' : info('מה זה "לפי הצפי"?', 'החודש עוד לא נסגר באקסל: חיוב שהיום שלו עבר נספר כאילו ירד ("לפי הצפי"), והסכומים יתעדכנו לבד כשהחודש ייסגר.')}
     ${exp.length ? `<div class="label">עוד צפוי לרדת · ${ils(sExp, 0)}</div>
-    <div class="card" style="padding:2px 14px">${exp.map(t => `<button class="txline" ${tap(t)}><div><div class="a">${ils(t.amount)}</div><div class="d">${esc(t.desc)} · ${catName(t)}</div></div>
+    <div class="card" style="padding:2px 14px">${exp.map(t => `<button class="txline" ${tap(t)}><div><div class="a">${ils(t.amount)}</div><div class="d">${descCat(t, catById(t.cat))}</div></div>
       <div class="r">צפוי ב-${dShort(t.date).slice(0, 5)}</div></button>`).join('')}</div>` : ''}
     ${went.length ? `<div class="label">${closed ? 'ירד בפועל' : 'כבר ירד'} · ${ils(sWent, 0)}</div>
     ${blocks.map(b => { const gs = b.g ? groupStyle(b.g) : null; return `<div class="card fxg">
       <div class="fxg-h">${gs ? `<span class="gicon" style="background:${gs.bg}">${gs.icon}</span>` : ''}<b>${b.g ? esc(b.g.name) : 'בלי סעיף'}</b><span>${ils(b.sum, 0)}</span></div>
-      ${b.items.sort(byDate).map(t => `<button class="txline" ${tap(t)}><div><div class="a">${ils(t.amount)}</div><div class="d">${esc(t.desc)}${t.st === 'xl' ? '' : ' · ' + catName(t)}</div></div>
+      ${b.items.sort(byDate).map(t => `<button class="txline" ${tap(t)}><div><div class="a">${ils(t.amount)}</div><div class="d">${t.st === 'xl' ? esc(t.desc) : descCat(t, catById(t.cat))}</div></div>
         <div class="r">${ST[t.st]}${t.date ? `<br>${dShort(t.date).slice(0, 5)}` : ''}</div></button>`).join('')}</div>`; }).join('')}` : ''}`;
 }
 // lines with the same description are sorted together: one choice for all of them
@@ -902,7 +941,7 @@ const descKey = t => (t.incoming ? '+' : '-') + String(t.desc || '').toLowerCase
 function pendGroups() {
   return cached('pgroups', () => {
     const by = new Map();
-    for (const t of pendingChat()) { const k = descKey(t); if (!by.has(k)) by.set(k, {key: k, items: []}); by.get(k).items.push(t); }
+    for (const t of pendingChat()) { const k = descKey(t) + (multiOpen(t) ? '#' + t.id : ''); if (!by.has(k)) by.set(k, {key: k, items: []}); by.get(k).items.push(t); }
     return [...by.values()].sort((a, b) => b.items.length - a.items.length || a.items[0].date.localeCompare(b.items[0].date));
   });
 }
@@ -910,16 +949,25 @@ const learnWords = t => String(t.desc || '').replace(/[()"]/g, ' ').split(/\s+/)
 function rvGroup(g) {
   const t = g.items[0], n = g.items.length, word = learnWords(t).slice(0, 2).join(' '), gk = esc(g.key);
   const lines = g.items.slice(0, 3).map(x => `<div class="rvl"><span>${dShort(x.date)} · ${esc(x.person || '')}${closedTag(x)}</span><span>${x.incoming ? '+' : ''}${ils(Math.abs(x.amount))}</span></div>`).join('');
-  return `<div class="card rv">
-    ${n === 1 ? `<div class="meta"><span>${dShort(t.date)} ${t.time || ''} · ${esc(t.person || '')}${closedTag(t)}</span><span class="amt ${t.incoming ? 'green' : ''}">${t.incoming ? '+' : ''}${ils(Math.abs(t.amount))}</span></div><div class="t">${esc(t.text)}</div>`
-      : `<div class="meta"><span><b style="font-size:16px;color:var(--ink)">${esc(t.desc || t.text)}</b> ×${n}</span><span class="amt">${ils(Math.abs(sumA(g.items)))}</span></div>${lines}${n > 3 ? `<div class="note" style="margin:2px 0 0">ועוד ${n - 3}</div>` : ''}`}
+  const top = n === 1 ? `<div class="meta"><span>${dShort(t.date)} ${t.time || ''} · ${esc(t.person || '')}${closedTag(t)}</span><span class="amt ${t.incoming ? 'green' : ''}">${t.incoming ? '+' : ''}${ils(Math.abs(t.amount))}</span></div><div class="t">${esc(t.text)}</div>`
+    : `<div class="meta"><span><b style="font-size:16px;color:var(--ink)">${esc(t.desc || t.text)}</b> ×${n}</span><span class="amt">${ils(Math.abs(sumA(g.items)))}</span></div>${lines}${n > 3 ? `<div class="note" style="margin:2px 0 0">ועוד ${n - 3}</div>` : ''}`;
+  // several numbers in the message: first which one is the amount, then the section
+  if (n === 1 && multiOpen(t)) return `<div class="card rv">${top}<div class="rvq">יש בהודעה יותר ממספר אחד – מה הסכום?</div>${amountChips(t)}</div>`;
+  return `<div class="card rv">${top}
     <div class="chips">${quickCats(t).map(c => `<button data-act="rvg-cat" data-g="${gk}" data-c="${c.id}"${incChip(c)}>${isIncome(c) ? '+ ' : ''}${esc(c.name)}</button>`).join('')}
-      <button data-act="rvg-more" data-g="${gk}" style="color:var(--blue);font-weight:600">סעיף אחר…</button>
-      <button data-act="rvg-skip" data-g="${gk}" style="color:var(--muted)">לא לייבא</button></div>
-    ${word ? `<label class="rvlearn"><input type="checkbox" data-learn="${gk}" ${S.noLearn && S.noLearn.has(g.key) ? '' : 'checked'}> לזכור: <input class="inp" data-lw="${gk}" value="${esc(S.lw && S.lw[g.key] != null ? S.lw[g.key] : word)}"></label>` : ''}
+      <button data-act="rvg-more" data-g="${gk}" class="more">אחר…</button></div>
+    <div class="rvfoot">${word ? `<label class="rvlearn"><input type="checkbox" data-learn="${gk}" ${S.noLearn && S.noLearn.has(g.key) ? '' : 'checked'}> לזכור: <input class="inp" data-lw="${gk}" value="${esc(S.lw && S.lw[g.key] != null ? S.lw[g.key] : word)}"></label>` : '<span></span>'}
+      <button data-act="rvg-skip" data-g="${gk}" class="rvskip">לא לייבא</button></div>
   </div>`;
 }
 function multiNums() { return cached('multi', () => D.chat.filter(it => it.multi && !(D.ov[it.id] || {}).numOk).map(it => chatTx(it)).filter(t => t && !t.skipped && t.date >= D.cfg.start && !isClosed(t.month))); }
+const multiOpen = t => cached('multiIds', () => new Set(multiNums().map(x => x.id))).has(t.id);
+// "which number is the amount?" – one chip per number in the message, the one taken now first
+function amountChips(t) {
+  const cur = Math.abs(t.amount), nums = msgNums(t.text).filter(v => v !== cur);
+  return `<div class="chips"><button data-act="mn-ok" data-id="${esc(t.id)}" class="on">${ils(cur)}</button>${nums.map(v => `<button data-act="mn-set" data-id="${esc(t.id)}" data-v="${v}">${ils(v)}</button>`).join('')}
+    <button data-act="mn-fix" data-id="${esc(t.id)}" class="more">סכום אחר…</button></div>`;
+}
 // sections that fit this line: from keywords and from lines with shared words that already have a section, then the most used
 // sections that fit this line: for money that came in – the likely expense sections (a refund) and also the income sections
 function quickCats(t) {
@@ -934,10 +982,13 @@ function quickCats(t) {
   for (const x of learnWords(t)) { const k = x.toLowerCase(); const m = idx.w.get(k); if (m) for (const c in m) score[c] = (score[c] || 0) + 10 * m[c];
     for (const [kw, c] of D.kw) { const kk = String(kw).toLowerCase().trim(); if (kk.length >= 3 && (kk.includes(k) || k.includes(kk))) score[c] = (score[c] || 0) + 25; } }
   for (const c in idx.cnt) score[c] = (score[c] || 0) + idx.cnt[c] / 1000;
-  const by = (a, b) => (score[b.id] || 0) - (score[a.id] || 0);
+  // a fixed-type section (insurance, mortgage…) is rarely written in the group: it comes up only when the words point to it
+  const low = c => c.kind === 'fixed' && (score[c.id] || 0) < 10 ? 1 : 0;
+  const by = (a, b) => low(a) - low(b) || (score[b.id] || 0) - (score[a.id] || 0);
   const list = cats().filter(ok).sort(by);
-  if (!t.incoming) return list.slice(0, 6);
-  return [...list.slice(0, 4), ...incCats(score)];
+  // three choices and "אחר…" fit one row on the phone
+  if (!t.incoming) return list.slice(0, 3);
+  return [...list.slice(0, 2), ...incCats(score).slice(0, 2)];
 }
 const incCats = score => cats().filter(c => isIncome(c) && !c.archived).sort((a, b) => ((score || {})[b.id] || 0) - ((score || {})[a.id] || 0)).slice(0, 4);
 const incChip = c => isIncome(c) ? ' class="incchip"' : '';
@@ -1266,20 +1317,31 @@ function fixedEdit(id) {
 
 /* ---- settings ---- */
 function settingsSheet() {
+  const bk = D.meta.lastBackup ? (D.meta.dirty ? '<span class="v warn">יש שינויים שלא גובו</span>' : `<span class="v">${new Date(D.meta.lastBackup).toLocaleDateString('he-IL')}</span>`) : '<span class="v warn">עוד לא – כדאי לגבות</span>';
   openSheet(() => `${head('הגדרות')}
+    <div class="gname">סעיפים ונתונים</div>
     <div class="actlist">
-      <button data-act="sync">חיבור לאקסל (ייצוא וטעינה) <span>›</span></button>
-      <button data-act="income">הכנסות צפויות <span>›</span></button>
       <button data-act="cats">סעיפים <span>›</span></button>
+      <button data-act="income">הכנסות צפויות <span>›</span></button>
       <button data-act="fixed">תנועות קבועות <span class="v">${D.fixed.length}</span></button>
       <button data-act="kw">מילות מפתח <span class="v">${D.kw.length}</span></button>
       <button data-act="pays">אמצעי תשלום <span class="v">${D.cfg.pays.length}</span></button>
-      <button data-act="importset">הגדרות ייבוא <span>›</span></button>
+    </div>
+    <div class="gname">ייבוא ואקסל</div>
+    <div class="actlist">
+      <button data-act="sync">חיבור לאקסל (ייצוא וטעינה) <span>›</span></button>
       <button data-act="import">ייבוא ידני של צ'אט מווטסאפ <span class="v">${D.meta.lastImport ? new Date(D.meta.lastImport.at).toLocaleDateString('he-IL') : '—'}</span></button>
+      <button data-act="importset">הגדרות ייבוא <span>›</span></button>
       <button data-act="guide">איך כותבים בקבוצה <span>›</span></button>
-      <button data-act="lock">נעילה בקוד / טביעת אצבע <span class="v">${lockOn() ? (L.bio ? 'קוד + טביעת אצבע' : 'קוד') : 'כבויה'}</span></button>
-      <button data-act="backup">גיבוי <span class="v">${D.meta.lastBackup ? new Date(D.meta.lastBackup).toLocaleDateString('he-IL') : 'עוד לא'}</span></button>
+    </div>
+    <div class="gname">אבטחה וגיבוי</div>
+    <div class="actlist">
+      <button data-act="backup">גיבוי ${bk}</button>
       <button data-act="restore">שחזור מגיבוי <span>›</span></button>
+      <button data-act="lock">נעילה בקוד / טביעת אצבע <span class="v">${lockOn() ? (L.bio ? 'קוד + טביעת אצבע' : 'קוד') : 'כבויה'}</span></button>
+    </div>
+    <div class="gname">על האפליקציה</div>
+    <div class="actlist">
       <button data-act="checkupd">בדיקת עדכון <span class="v">גרסה ${APP_VERSION}</span></button>
       <button data-act="history">היסטוריית גרסאות <span>›</span></button>
       <button data-act="wipe" class="danger">מחיקת כל הנתונים מהטלפון <span>🗑</span></button>
@@ -1765,10 +1827,7 @@ const ACT = {
   'keep-restore': () => restoreKept(),
   backup: () => backupSheet(),
   wipe: () => wipeSheet(),
-  add: () => openSheet(() => `${head('מה לעשות?')}<div class="actlist">
-      <button data-act="import">ייבוא צ'אט מווטסאפ <span>💬</span></button>
-      <button data-act="manual">הוספה ידנית (הכנסה / הוצאה שלא בקבוצה) <span>✍️</span></button>
-      <button data-act="fixed">תנועות קבועות <span>🔁</span></button></div>`),
+  add: () => { stack.slice().forEach(e => closeSheet(e)); manualSheet(null, ''); },
   manual: el => { if (stack.length && !el.dataset.id) closeSheet(); manualSheet(null, el.dataset.id || ''); },
   fixed: () => { if (stack.length && stack[stack.length - 1].sh.querySelector('[data-act=fixed]')) closeSheet(); fixedList(); },
   'fx-edit': el => fixedEdit(el.dataset.id),
@@ -1802,6 +1861,7 @@ const ACT = {
   'rvg-skip': el => groupPick(el.dataset.g, SKIP),
   rvseg: el => { S.rv = el.dataset.v; window.scrollTo(0, 0); render(); },
   'mn-ok': el => setOv(el.dataset.id, {numOk: true}),
+  'mn-set': el => setOv(el.dataset.id, {amount: +el.dataset.v, numOk: true}),
   'mn-fix': el => { const t = findTx(el.dataset.id); askAmount('הסכום הנכון', Math.abs(t.amount), v => setOv(el.dataset.id, {amount: v, numOk: true})); },
   'rv-more': el => pickCat('לאיזה סעיף?', null, '', c => setChatCat(el.dataset.id, c)),
   'dup-skip': el => { setOv(el.dataset.id, {skip: true}); toast('נספר פעם אחת'); },
@@ -1813,6 +1873,8 @@ const ACT = {
   'm-edit': el => { const x = D.manual.find(m => m.id === el.dataset.id); closeSheet(); manualSheet(x); },
   'm-del': el => { if (!el.dataset.sure) { el.dataset.sure = 1; el.innerHTML = 'בטוח? לחיצה נוספת מוחקת <span>🗑</span>'; return; } D.manual = D.manual.filter(m => m.id !== el.dataset.id); save(); closeSheet(); render(); refreshSheets(); },
   dismiss: el => { S.dismissed.add(el.dataset.id); render(); },
+  stale: () => staleSheet(),
+  'stale-ok': () => { S.dismissed.add('stale'); closeSheet(); render(); },
   settings: () => settingsSheet(),
   income: () => incomeSheet(),
   incdet: () => incDetailSheet(),
@@ -1822,6 +1884,8 @@ const ACT = {
   grp: el => groupSheet(el.dataset.id),
   goto: el => { S.month = el.dataset.m; render(); window.scrollTo(0, 0); },
   f: el => { S.f[el.dataset.k] = el.dataset.v; render(); },
+  fopen: () => { S.fOpen = !S.fOpen; render(); },
+  fclear: () => { Object.assign(S.f, {g: '', pay: '', who: ''}); render(); },
   kw: () => kwSheet(),
   guide: () => guideSheet(),
   sync: () => syncSheet(),
@@ -1900,7 +1964,7 @@ window.addEventListener('popstate', () => {
   setTimeout(() => { if (!guardActive) pushGuard(); }, 2200);
 });
 /* =============== installed app: share target + updates =============== */
-const APP_VERSION = '3.3';
+const APP_VERSION = '3.4';
 async function importPendingShare() {
   let c; try { c = await caches.open('shared'); } catch { return; }
   const fr = await c.match('./shared-file'), ir = await c.match('./shared-info');

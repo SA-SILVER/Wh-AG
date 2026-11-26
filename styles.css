@@ -212,8 +212,19 @@ nav .dot{background:#E5356B}
 
 /* review: grouped lines, learn-word option, segments */
 .rvl{display:flex;justify-content:space-between;font-size:13px;color:var(--muted);padding:2px 0}
-.rvlearn{display:flex;align-items:center;gap:8px;margin-top:10px;font-size:13.5px;color:var(--muted)}
-.rvlearn .inp{flex:1;padding:7px 10px;font-size:14px}
+.rvlearn{display:flex;align-items:center;gap:6px;font-size:13px;color:var(--muted);flex:1;min-width:0}
+.rvlearn .inp{flex:1;min-width:0;padding:6px 10px;font-size:13.5px;box-shadow:none;background:#F7F5F9}
+/* compact review card: choices, then one small row with "remember" and "don't import" */
+.rvfoot{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:10px}
+.rvskip{font-size:13px;color:var(--muted);padding:6px 2px;white-space:nowrap;text-decoration:underline;text-underline-offset:3px;text-decoration-color:#D9D6E0}
+.rvq{font-size:13.5px;color:#9C4A33;margin:2px 0 8px}
+.chips button.more{color:var(--blue);background:transparent;box-shadow:inset 0 0 0 1px #E6E2EC}
+/* a short explanation that opens on a tap */
+details.info{margin:6px 4px 10px;font-size:13.5px;color:var(--muted)}
+details.info summary{cursor:pointer;list-style:none;padding:4px 2px;line-height:1.5}
+details.info summary::-webkit-details-marker{display:none}
+details.info[open] summary{color:var(--ink)}
+details.info div{background:#F4EEF4;border-radius:14px;padding:10px 14px;margin-top:4px;line-height:1.55}
 .rvseg{display:flex;gap:6px;background:#fff;border-radius:999px;padding:4px;margin:0 0 14px;box-shadow:var(--shadow)}
 .rvseg button{flex:1;padding:10px 6px;border-radius:999px;font-size:14px}
 .rvseg button.on{color:#fff}
@@ -245,6 +256,20 @@ body:has(.ov.on) .toast.on{transform:translateX(-50%)}
 .fxs-row b{font-weight:400}
 .fxs-row.tot{border-top:1px solid var(--line);margin-top:4px;padding-top:9px;color:var(--muted)}
 
-.opennote{padding:12px 16px;margin-top:14px;background:#F4EEF4;box-shadow:none}
-.opennote b{font-weight:400;font-size:14px}
-.opennote p{margin:4px 0 0;font-size:13.5px;color:var(--muted);line-height:1.55}
+
+/* data screen: one "filter" button, the panel opens under it */
+.fbar{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.fbtn{background:var(--card);box-shadow:0 2px 8px rgba(80,60,20,.06);border-radius:999px;padding:8px 14px;font-size:13.5px;white-space:nowrap}
+.fbtn.on{background:#FBE9E1;color:#9C4A33}
+.fbtn span{font-size:11px;margin-inline-start:2px}
+.fpanel{padding:6px 14px 10px;margin-top:8px}
+.fpanel .field{margin:8px 0}
+.fpanel .inp{padding:10px 12px;font-size:14px}
+.upcard{background:#FCFAFD;box-shadow:inset 0 0 0 1px #EEEAF3}
+/* the stale-import reminder and the quiet fixed line in the payment card */
+.banner.stale{background:#EEF4FB}
+.payfx .d{margin:0}
+/* settings: grouped lists; backup stands out when it is needed */
+.sheet .gname:first-of-type{margin-top:2px}
+.actlist span.v.warn{color:#C2563F}
+.actlist + .gname{margin-top:18px}
