@@ -393,13 +393,21 @@ function fixedDupPairs() {
 function openFixed(m) { return fixedFor(m).filter(f => !f.ok && !(D.fixed.find(x => x.id === f.fid) || {}).xkey); }
 function openRefunds() { return D.chat.map(it => chatTx(it)).filter(t => t && t.refundExp && !t.refundDone); }
 function openIncome(m) { const l = monthTx(m); return l.filter(t => t.src === 'income' && !t.ok); }
+// months that weren't closed in Excel yet: their fixed charges and incomes count as expected, and are
+// replaced by the exact amounts when the month is closed in Excel and the file is loaded here
+function openMonths() { const out = []; for (let m = minMonth(); m <= curMonth(); m = addM(m, 1)) if (!isClosed(m)) out.push(m); return out; }
+function openMonthsNote() {
+  const om = openMonths(); if (!om.length) return '';
+  return `<div class="card opennote"><b>${om.length === 1 ? 'חודש שעוד לא נסגר באקסל' : 'חודשים שעוד לא נסגרו באקסל'}: ${om.map(sheetName).join(', ')}</b>
+    <p>הוצאות קבועות והכנסות בחודשים האלה נספרות לפי הצפי, ולא צריך לאשר אותן כאן אחת־אחת. כשסוגרים חודש באקסל וטוענים את הקובץ לאפליקציה, הסכומים מתעדכנים לסכומים המדויקים.</p></div>`;
+}
 function dueFixed() { const out = []; for (const m of reviewMonths()) out.push(...openFixed(m).filter(f => f.date <= todayStr()), ...openIncome(m)); return out; }
 function entryByKey(k) {
   const m = k.split('|')[1];
   if (k.startsWith('inc:')) return monthTx(m).find(t => t.key === k) || (() => { const c = catById(k.slice(4).split('|')[0]); return {key: k, amount: num(c && c.budget), cat: c && c.id}; })();
   const fid = k.split('|')[0]; return fixedFor(m).find(x => x.fid === fid);
 }
-function reviewCount() { return pendingChat().length + rfAsks().length + multiNums().length + dueFixed().length + dupPairs().length + ((D.meta.fxAsk || []).length) + ((D.meta.fxChanges || []).length ? 1 : 0); }
+function reviewCount() { return pendingChat().length + rfAsks().length + multiNums().length + dupPairs().length + ((D.meta.fxAsk || []).length) + ((D.meta.fxChanges || []).length ? 1 : 0); }
 
 const SKIP = '__skip';
 const kwCatName = c => c === SKIP ? 'לא לייבא' : (catById(c) ? catById(c).name : '?');
@@ -803,7 +811,7 @@ function txLine(t, o) {
 
 /* ---- review ---- */
 function viewReview() {
-  const pc = pendingChat(), of = dueFixed(), rf = openRefunds(), dp = dupPairs(), mn = multiNums(), ra = rfAsks();
+  const pc = pendingChat(), of = [], rf = openRefunds(), dp = dupPairs(), mn = multiNums(), ra = rfAsks();
   const fa0 = D.meta.fxAsk || [], fc0 = D.meta.fxChanges || [];
   const todo = pc.length + of.length + rf.length + dp.length + fa0.length + (fc0.length ? 1 : 0) + mn.length + ra.length;
   const seg = `<div class="seg rvseg"><button class="${S.rv !== 'fixed' ? 'on' : ''}" data-act="rvseg" data-v="todo">לטיפול${todo ? ` (${todo})` : ''}</button><button class="${S.rv === 'fixed' ? 'on' : ''}" data-act="rvseg" data-v="fixed">קבועות ${mName(S.month)}</button></div>`;
@@ -831,12 +839,11 @@ function viewReview() {
           <button data-act="rf-none" data-id="${esc(t.id)}" style="color:var(--muted)">${t.rfAsk.length ? 'לא קשור להוצאה – ' : ''}לבחור סעיף</button>
           ${t.noAmt ? `<button data-act="rf-skip" data-id="${esc(t.id)}" style="color:var(--muted)">להתעלם (לא כסף)</button>` : ''}</div></div>`).join('')}` : ''}
     ${pc.length ? `<div class="label">לבחור סעיף (${pc.length}${pendGroups().length < pc.length ? ` שורות ב-${pendGroups().length} קבוצות` : ''})</div>${pendGroups().map(rvGroup).join('')}` : ''}
-    ${of.length ? `<div class="label">קבועות והכנסות לאישור – כמה ירד / נכנס בפועל?</div><div class="card">${of.map(f => `<div class="txline" style="align-items:center"><div><div class="a">${ils(f.amount)}</div><div class="d">${esc(f.desc)} · ${esc(catById(f.cat)?.name || '')} · ${dShort(f.date)}</div></div>
-        <div style="display:flex;gap:6px"><button class="smallbtn" data-act="fx-ok" data-k="${esc(f.key)}">ירד ✓</button><button class="smallbtn" data-act="tx" data-id="${esc(f.id)}">סכום אחר</button></div></div>`).join('')}</div>` : ''}
     ${rf.length ? `<div class="label">מחכות להחזר (${rf.length})</div><div class="card">${rf.map(t => `<div class="txline" style="align-items:center"><div><div class="a">${ils(t.refundAmt || t.amount)}${t.refundGot ? ` <span class="note">· חזרו ${ils(t.refundGot)}</span>` : ''}</div><div class="d">${esc(t.text)} · ${dShort(t.date)}</div></div>
         <button class="smallbtn" data-act="rf-done" data-id="${esc(t.id)}">התקבל ✓</button></div>`).join('')}</div>
         <p class="note" style="margin:6px">כשהחזר נכנס, כותבים אותו בקבוצה ("התקבל 445 החזר"). הוא מתחבר לבד להוצאה ויורד ממנה כמינוס, גם אם הגיע בכמה הודעות. כשחוזר כמעט כל הסכום ההוצאה נסגרת לבד; כאן מסמנים רק החזר חלקי שלא יגיע ממנו יותר.</p>` : ''}
-    ${!todo ? `<div class="empty">${I.flower}<h2>הכל <span class="script">מסודר</span></h2><p class="note">אין כרגע מה לבדוק.</p><button class="ghost" data-act="rvseg" data-v="fixed" style="max-width:280px;margin:8px auto 0">לקבועות של ${mName(S.month)}</button></div>` : ''}`;
+    ${!todo ? `<div class="empty">${I.flower}<h2>הכל <span class="script">מסודר</span></h2><p class="note">אין כרגע מה לבדוק.</p><button class="ghost" data-act="rvseg" data-v="fixed" style="max-width:280px;margin:8px auto 0">לקבועות של ${mName(S.month)}</button></div>` : ''}
+    ${openMonthsNote()}`;
 }
 // every fixed expense of the month, grouped by category (group).
 // What already went out is shown at its actual amount; what has not yet is shown as expected.
@@ -850,25 +857,42 @@ function fixedRows(m) {
       .filter(r => r.amount || fxCats.has(r.cat));
   }
   return md.list.filter(t => !t.pending && isFx(catById(t.cat))).map(t => t.src === 'fixed'
-    ? {cat: t.cat, desc: t.desc, amount: t.amount, st: t.ok ? 'ok' : t.date <= td ? 'due' : 'exp', day: +t.date.slice(8), fid: t.fid}
-    : {cat: t.cat, desc: t.desc || t.text || '', amount: t.amount, st: 'ok', day: +t.date.slice(8), id: t.id});
+    ? {cat: t.cat, desc: t.desc, amount: t.amount, st: t.ok ? 'ok' : t.date <= td ? 'due' : 'exp', day: +t.date.slice(8), date: t.date, fid: t.fid, key: t.key}
+    : {cat: t.cat, desc: t.desc || t.text || '', amount: t.amount, st: 'ok', day: +t.date.slice(8), date: t.date, id: t.id});
 }
+// The month's fixed expenses in two clear parts, so it is plain what the expected amount is made of:
+// 1. already gone out – marked, written in the group / by hand, or its day has passed ("לפי הצפי": until the month is closed in Excel)
+// 2. still to go out (its day hasn't come) – the same number as "עוד צפוי לרדת" on the home screen
 function fixedByGroup(m) {
   const list = fixedRows(m), closed = isClosed(m);
   const head = `<div class="label">הוצאות קבועות – ${mName(m)}${closed ? ' · לפי האקסל (נסגר)' : ''}</div>`;
   if (!list.length) return `${head}<div class="card"><p class="note" style="margin:4px 0">אין הוצאות קבועות בחודש הזה.</p><div class="chips"><button data-act="fixed" style="color:var(--blue)">לרשימת הקבועות</button></div></div>`;
+  const tap = t => t.fid ? `data-act="fx-edit" data-id="${esc(t.fid)}"` : t.id ? `data-act="tx" data-id="${esc(t.id)}"` : `data-act="cat" data-id="${esc(t.cat)}"`;
+  const catName = t => esc((catById(t.cat) || {}).name || '?');
+  const byDate = (x, y) => (x.day || 0) - (y.day || 0);
+  const exp = list.filter(t => t.st === 'exp').sort(byDate), went = list.filter(t => t.st !== 'exp');
+  const sExp = sumA(exp), sWent = sumA(went);
   const by = new Map();
-  for (const t of list) { const c = catById(t.cat), g = c && D.cfg.groups.find(x => x.id === c.group); const k = g ? g.id : ''; if (!by.has(k)) by.set(k, {g, items: []}); by.get(k).items.push(t); }
+  for (const t of went) { const c = catById(t.cat), g = c && D.cfg.groups.find(x => x.id === c.group); const k = g ? g.id : ''; if (!by.has(k)) by.set(k, {g, items: []}); by.get(k).items.push(t); }
   const blocks = [...by.values()].map(b => ({...b, sum: sumA(b.items)})).sort((a, b) => b.sum - a.sum);
-  // the same rule as the home screen: a charge whose day has passed counts as gone out, even before it is confirmed
-  const went = sumA(list.filter(t => t.st !== 'exp')), due = sumA(list.filter(t => t.st === 'due')), left = sumA(list.filter(t => t.st === 'exp'));
-  const ST = {ok: '<span style="color:var(--green)">ירד ✓</span>', xl: '<span style="color:var(--green)">בפועל ✓</span>', due: 'לאישור', exp: 'צפוי'};
+  const ST = {ok: '<span style="color:var(--green)">ירד ✓</span>', xl: '<span style="color:var(--green)">בפועל ✓</span>', due: 'לפי הצפי'};
+  const sumRow = (label, v, color) => `<div class="fxs-row"><span><i style="background:${color}"></i>${label}</span><b>${ils(v, 0)}</b></div>`;
   return `${head}
-    <div class="card" style="padding:10px 14px;margin-bottom:10px;display:flex;justify-content:space-between;font-size:13.5px"><span>${closed ? 'ירד בפועל' : 'ירד עד היום'} <b>${ils(went, 0)}</b>${due ? `<br><span class="note">מתוכם ${ils(due, 0)} לאישור</span>` : ''}</span>${closed || !left ? '' : `<span>צפוי בהמשך <b>${ils(left, 0)}</b></span><span style="color:var(--muted)">סה"כ ${ils(went + left, 0)}</span>`}</div>
+    <div class="card fxs">
+      ${closed ? sumRow('ירד בפועל (לפי האקסל)', sWent, '#23805A') : `
+      ${sumRow('כבר ירד', sWent, '#23805A')}
+      ${sumRow('עוד צפוי לרדת החודש', sExp, '#8FB6E3')}
+      <div class="fxs-row tot"><span>סה"כ קבועות ב${mName(m)}</span><b>${ils(sWent + sExp, 0)}</b></div>`}
+    </div>
+    ${closed ? '' : `<p class="note" style="margin:0 8px 6px">החודש עוד לא נסגר באקסל: חיוב שהיום שלו עבר נספר כאילו ירד ("לפי הצפי"), והסכומים יתעדכנו לבד כשהחודש ייסגר.</p>`}
+    ${exp.length ? `<div class="label">עוד צפוי לרדת · ${ils(sExp, 0)}</div>
+    <div class="card" style="padding:2px 14px">${exp.map(t => `<button class="txline" ${tap(t)}><div><div class="a">${ils(t.amount)}</div><div class="d">${esc(t.desc)} · ${catName(t)}</div></div>
+      <div class="r">צפוי ב-${dShort(t.date).slice(0, 5)}</div></button>`).join('')}</div>` : ''}
+    ${went.length ? `<div class="label">${closed ? 'ירד בפועל' : 'כבר ירד'} · ${ils(sWent, 0)}</div>
     ${blocks.map(b => { const gs = b.g ? groupStyle(b.g) : null; return `<div class="card fxg">
       <div class="fxg-h">${gs ? `<span class="gicon" style="background:${gs.bg}">${gs.icon}</span>` : ''}<b>${b.g ? esc(b.g.name) : 'בלי סעיף'}</b><span>${ils(b.sum, 0)}</span></div>
-      ${b.items.sort((x, y) => (x.day || 0) - (y.day || 0)).map(t => `<button class="txline" ${t.fid ? `data-act="fx-edit" data-id="${esc(t.fid)}"` : t.id ? `data-act="tx" data-id="${esc(t.id)}"` : 'data-act="cat" data-id="' + esc(t.cat) + '"'}><div><div class="a">${ils(t.amount)}</div><div class="d">${esc(t.desc)}${t.st === 'xl' ? '' : ' · ' + esc(catById(t.cat)?.name || '?')}</div></div>
-        <div class="r">${ST[t.st]}${t.day ? `<br>ב-${t.day} לחודש` : ''}</div></button>`).join('')}</div>`; }).join('')}`;
+      ${b.items.sort(byDate).map(t => `<button class="txline" ${tap(t)}><div><div class="a">${ils(t.amount)}</div><div class="d">${esc(t.desc)}${t.st === 'xl' ? '' : ' · ' + catName(t)}</div></div>
+        <div class="r">${ST[t.st]}${t.date ? `<br>${dShort(t.date).slice(0, 5)}` : ''}</div></button>`).join('')}</div>`; }).join('')}` : ''}`;
 }
 // lines with the same description are sorted together: one choice for all of them
 const descKey = t => (t.incoming ? '+' : '-') + String(t.desc || '').toLowerCase().replace(/[\d.,₪"'()\-–]/g, ' ').replace(/\s+/g, ' ').trim();
@@ -1839,7 +1863,7 @@ window.addEventListener('popstate', () => {
   setTimeout(() => { if (!guardActive) pushGuard(); }, 2200);
 });
 /* =============== installed app: share target + updates =============== */
-const APP_VERSION = '3.1';
+const APP_VERSION = '3.2';
 async function importPendingShare() {
   let c; try { c = await caches.open('shared'); } catch { return; }
   const fr = await c.match('./shared-file'), ir = await c.match('./shared-info');

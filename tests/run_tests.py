@@ -332,6 +332,17 @@ def main():
         check('no screen is wider than a 360px phone', not wide, wide)
         pg.set_viewport_size({'width': 390, 'height': 844})
 
+        print('fixed expenses: clear parts')
+        r = ev("""() => { S.month = curMonth(); const html = fixedByGroup(S.month); const d = dash(S.month);
+            const rows = fixedRows(S.month); const exp = rows.filter(t => t.st === 'exp').reduce((s, t) => s + t.amount, 0);
+            return {sameAsHome: Math.abs(exp - d.upc) < 0.01, hasParts: html.includes('כבר ירד') && html.includes('עוד צפוי לרדת')}; }""")
+        check('"עוד צפוי לרדת" in the fixed list = the home screen number', r['sameAsHome'], r)
+        check('the fixed list shows "כבר ירד" and "עוד צפוי לרדת"', r['hasParts'], r)
+        r2 = ev("""() => { S.rv = 'todo'; S.view = 'review'; render(); const t = document.querySelector('#app').innerText;
+            return {noConfirm: !document.querySelector('#app [data-act=fx-ok]'), note: t.includes('עוד לא נסגר') || t.includes('עוד לא נסגרו')}; }""")
+        check('"לטיפול" has no "ירד ✓" buttons for fixed charges and incomes', r2['noConfirm'], r2)
+        check('"לטיפול" notes the months not closed in Excel', r2['note'], r2)
+
         print('screens render without errors')
         for v in ['home', 'data', 'review']:
             ev(f"ACT.view({{dataset: {{v: '{v}'}}}})")
