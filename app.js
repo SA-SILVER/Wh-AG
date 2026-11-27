@@ -556,7 +556,7 @@ function parseChat(text) {
   // only so that a refund arriving after the start still comes off that expense's section
   const preFrom = new Date(Date.parse(D.cfg.start) - 365 * 864e5).toISOString().slice(0, 10);
   const pre = items.filter(i => i.date < D.cfg.start && i.date >= preFrom && i.refundExp && !i.incoming);
-  return {items: items.filter(i => i.date >= D.cfg.start), all: items.length, order, senders: [...senders], addedPays, pre, preSeen: items.some(i => i.date < D.cfg.start)};
+  return {items: items.filter(i => i.date >= D.cfg.start), allItems: items, all: items.length, order, senders: [...senders], addedPays, pre, preSeen: items.some(i => i.date < D.cfg.start)};
 }
 async function readChatFile(file) {
   const u8 = new Uint8Array(await file.arrayBuffer());
@@ -623,6 +623,9 @@ async function importFile(file, fromShare) {
   const before = pendingChat().length;
   const m = mergeChat(r.items);
   if (r.preSeen) D.rfPre = r.pre;
+  // the whole history, for "הצעת מילות מפתח": in memory only – never saved, gone when the app closes
+  S.hist = {items: r.allItems, from: r.allItems.length ? r.allItems[0].date : '', to: r.allItems.length ? r.allItems[r.allItems.length - 1].date : ''};
+  const kwN = kwSuggest(S.hist.items).length;
   const last = r.items.length ? r.items[r.items.length - 1] : null;
   const prevUntil = (D.meta.lastImport || {}).until || '', until = last ? `${last.date} ${last.time}` : '';
   D.meta.lastImport = {at: Date.now(), file: fromShare ? 'שיתוף מווטסאפ' : file.name, until: until && until > prevUntil ? until : (prevUntil || until), order: r.order};
@@ -640,7 +643,8 @@ async function importFile(file, fromShare) {
     ${r.addedPays.length ? `<p class="note">אמצעי תשלום חדשים שזוהו: <b>${r.addedPays.map(esc).join(', ')}</b></p>` : ''}
     ${r.senders.length ? `<p class="note">שולחים: ${r.senders.map(s => `${esc(s)} ← <b>${esc(senderToPerson(s))}</b>`).join(' · ')}</p>` : ''}
     <div class="banner" style="background:var(--blue-soft)"><span>${fromShare ? '🔒 הצ\'אט נקלט ישר מווטסאפ – שום קובץ לא נשמר בטלפון, ואין מה למחוק.' : '🔒 קובץ הייצוא נשאר בתיקיית ההורדות ומכיל את כל השיחה. אפשר למחוק אותו עכשיו – הנתונים כבר באפליקציה.'}</span></div>
-    ${pend || rAsk ? `<button class="primary" data-act="go-review">${pend ? `לבחירת סעיפים (${pend + rAsk})` : `לבחירת הוצאה להחזר (${rAsk})`}</button>` : '<button class="primary" data-act="close">מעולה</button>'}`);
+    ${pend || rAsk ? `<button class="primary" data-act="go-review">${pend ? `לבחירת סעיפים (${pend + rAsk})` : `לבחירת הוצאה להחזר (${rAsk})`}</button>` : '<button class="primary" data-act="close">מעולה</button>'}
+    ${kwN ? `<button class="ghost" data-act="kwsug">💡 הצעת מילות מפתח מכל ההיסטוריה (${kwN})</button>` : ''}`);
 }
 
 /* =============== UI state & render =============== */
@@ -1057,6 +1061,90 @@ function recategorize() {
   for (const it of D.rfPre || []) { it.cat = suggestCat(it.desc, false) || ''; if (it.cat === SKIP) it.cat = ''; }
 }
 
+/* ---- keyword suggestions from the whole chat ----
+   Runs only on the phone. The history from the last import stays in memory (S.hist) and is never saved;
+   only the words that were approved go into the keyword list. */
+const KW_STOP = /^(של|על|עם|את|אל|גם|או|עוד|כל|זה|זו|לא|כן|יש|אין|עבור|דרך|בשביל|העברה|העברתי|ביט|בביט|לביט|פייבוקס|בפייבוקס|לפייבוקס|מזומן|במזומן|אשראי|באשראי|כרטיס|בכרטיס|החזר|התקבל|שח|שקל|שקלים|הוראת|קבע|יתקבל|להתקבל|צפוי)$/;
+function kwWords(desc) {
+  const bad = new Set([...people(), ...CARD_CO].map(w => String(w).toLowerCase()));
+  return [...new Set(String(desc || '').toLowerCase().replace(/["״(),.:;!?\-–_/\\*+=<>[\]{}|@#%&~`^$]/g, ' ').split(/\s+/)
+    .filter(w => w.length >= 2 && !/\d/.test(w) && !KW_STOP.test(w) && !bad.has(w)))];
+}
+// a two-letter word ("גן") is saved with spaces around it, so it matches only as a whole word
+const kwForm = w => w.length <= 2 ? ` ${w} ` : w;
+// words that repeat (3 times or more) in expense lines that no keyword recognizes yet, with the sections that lines with
+// the same word already got in the app (chosen by hand or skipped)
+function kwSuggest(items) {
+  const no = new Set(D.meta.kwNo || []);
+  const ev = new Map();
+  for (const it of D.chat) {
+    if (it.incoming) continue;
+    const o = D.ov[it.id] || {}, c = o.skip ? SKIP : (o.cat || it.cat);
+    if (!c || (c !== SKIP && !catById(c))) continue;
+    for (const w of kwWords(it.desc)) { const m = ev.get(w) || ev.set(w, {}).get(w); m[c] = (m[c] || 0) + 1; }
+  }
+  const by = new Map();
+  items.forEach((it, i) => {
+    if (it.incoming || it.noAmt || suggestCat(it.desc, false)) return;
+    kwWords(it.desc).forEach((w, pos) => {
+      if (no.has(w)) return;
+      const x = by.get(w) || by.set(w, {w, n: 0, ex: [], at: [], pos}).get(w); x.n++; x.at.push(i);
+      if (x.ex.length < 3 && !x.ex.includes(it.desc)) x.ex.push(it.desc);
+    });
+  });
+  // words that always come together ("מתנה ליום הולדת") are one suggestion: the first word, with the others as options
+  const sig = new Map();
+  for (const x of by.values()) { if (x.n < 3) continue; const k = x.at.join(','); (sig.get(k) || sig.set(k, []).get(k)).push(x); }
+  const merged = [...sig.values()].map(g => { g.sort((a, b) => a.pos - b.pos); return {...g[0], alts: g.slice(1).map(x => x.w)}; });
+  return merged.map(x => {
+    const m = ev.get(x.w) || {}, tot = Object.values(m).reduce((a, b) => a + b, 0);
+    const cats = Object.entries(m).sort((a, b) => b[1] - a[1]).filter(([, k], i) => i === 0 || k / tot >= .25).slice(0, 2).map(([c]) => c);
+    return {...x, cats};
+  }).sort((a, b) => b.n - a.n || a.w.localeCompare(b.w));
+}
+function kwSuggestSheet() {
+  const hist = S.hist && S.hist.items.length ? S.hist : null;
+  let shown = 20;
+  const items = () => hist ? hist.items : D.chat;
+  openSheet(e => {
+    const all = items(), list = kwSuggest(all);
+    const exp = all.filter(i => !i.incoming && !i.noAmt), open = exp.filter(i => !suggestCat(i.desc, false)).length;
+    const nNo = (D.meta.kwNo || []).length;
+    const card = x => `<div class="card rv">
+      <div class="meta"><span><b style="font-size:16px;color:var(--ink)">${esc(x.w)}</b> ×${x.n}</span><span>${x.cats.length ? '' : 'אין עדיין שורה כזו עם סעיף'}</span></div>
+      <div class="note" style="margin:2px 0 8px">${x.ex.map(esc).join(' · ')}</div>
+      ${x.alts.length ? `<div class="kwalt">או מילה אחרת: ${x.alts.map(a => `<button data-kalt="${esc(a)}" data-for="${esc(x.w)}">${esc(a)}</button>`).join('')}</div>` : ''}
+      <div class="chips">${x.cats.map(c => `<button data-kp="${esc(x.w)}" data-c="${esc(c)}"${c === SKIP ? ' style="color:var(--red)"' : ''}>${esc(kwCatName(c))}</button>`).join('')}
+        <button data-ko="${esc(x.w)}" class="more">${x.cats.length ? 'סעיף אחר…' : 'בחירת סעיף…'}</button></div>
+      <div class="rvfoot"><label class="rvlearn">המילה: <input class="inp" data-kwv="${esc(x.w)}" value="${esc(x.w)}"></label>
+        <button class="rvskip" data-kn="${esc([x.w, ...x.alts].join('\n'))}">לא מילת מפתח</button></div></div>`;
+    return `${head('הצעת מילות מפתח')}
+      <p class="note" style="margin-top:0">${hist ? `נסרקו ${exp.length} הוצאות מהקבוצה, מ־${dShort(hist.from)} עד ${dShort(hist.to)}.` : `נסרקו ${exp.length} הוצאות שכבר באפליקציה.`} ${open} מהן עוד בלי מילה שמזהה אותן. אלה המילים שחוזרות בהן הכי הרבה:</p>
+      ${hist ? '' : info('איך סורקים את כל ההיסטוריה', 'בקבוצה: ⋮ ← עוד ← ייצוא צ\'אט ← ללא מדיה ← איפה הכסף. בחלון "הייבוא הושלם" לוחצים "הצעת מילות מפתח מכל ההיסטוריה".')}
+      ${info('איך זה עובד', 'לכל מילה מוצע הסעיף שכבר בחרתם לשורות שיש בהן אותה מילה. בוחרים סעיף – והמילה נכנסת למילות המפתח, ומעכשיו מזהה לבד. אפשר לקצר או לתקן את המילה לפני הבחירה. "לא מילת מפתח" – המילה לא תוצע שוב. 🔒 ההודעות נסרקות רק בטלפון ולא נשמרות; נשמרות רק המילים שאישרתם, וב"ייצוא לאקסל" הן עוברות גם לגיליון "רשימות".')}
+      ${list.length ? list.slice(0, shown).map(card).join('') + (list.length > shown ? `<button class="ghost" data-kmore="1">להציג עוד (${list.length - shown})</button>` : '')
+        : `<div class="empty" style="padding:16px 10px"><h2 style="font-size:22px">אין מילים חדשות להציע</h2><p class="note">כל מה שחוזר 3 פעמים ומעלה כבר מזוהה.</p></div>`}
+      ${nNo ? `<button class="rvskip" data-kreset="1" style="display:block;margin:14px auto 0">להציע שוב מילים שסימנתי "לא מילת מפתח" (${nNo})</button>` : ''}`;
+  }, {live: true, mount(sh, e) {
+    const word = w => { const i = sh.querySelector(`[data-kwv="${CSS.escape(w)}"]`); return ((i && i.value) || w).trim(); };
+    const add = (w, c) => {
+      const v = word(w); if (!v) return toast('צריך מילה');
+      const k = kwForm(v); D.kw = D.kw.filter(([x]) => x !== k); D.kw.push([k, c]);
+      recategorize(); save(true, {undo: true}); e.paint(); render();
+      toast(`"${v}" ← ${kwCatName(c)}`);
+    };
+    sh.addEventListener('click', ev => {
+      const b = ev.target.closest('button'); if (!b) return;
+      if (b.dataset.kp) add(b.dataset.kp, b.dataset.c);
+      else if (b.dataset.ko) { const w = b.dataset.ko; pickCat(`"${word(w)}" – לאיזה סעיף?`, false, '', c => add(w, c), true); }
+      else if (b.dataset.kn) { D.meta.kwNo = [...new Set([...(D.meta.kwNo || []), ...b.dataset.kn.split('\n')])]; save(true, {undo: true}); e.paint(); }
+      else if (b.dataset.kalt) { const i = sh.querySelector(`[data-kwv="${CSS.escape(b.dataset.for)}"]`); if (i) i.value = b.dataset.kalt; }
+      else if (b.dataset.kmore) { shown += 20; e.paint(); }
+      else if (b.dataset.kreset) { D.meta.kwNo = []; save(); e.paint(); }
+    });
+  }, onClose() { render(); }});
+}
+
 /* =============== sheets =============== */
 const stack = [];
 function openSheet(build, opts = {}) {
@@ -1325,6 +1413,7 @@ function settingsSheet() {
       <button data-act="income">הכנסות צפויות <span>›</span></button>
       <button data-act="fixed">תנועות קבועות <span class="v">${D.fixed.length}</span></button>
       <button data-act="kw">מילות מפתח <span class="v">${D.kw.length}</span></button>
+      <button data-act="kwsug">הצעת מילות מפתח מההיסטוריה <span>›</span></button>
       <button data-act="pays">אמצעי תשלום <span class="v">${D.cfg.pays.length}</span></button>
     </div>
     <div class="gname">ייבוא ואקסל</div>
@@ -1384,6 +1473,7 @@ function catsSheet() {
 function kwSheet() {
   let cat = '';
   openSheet(() => `${head('מילות מפתח')}
+    <button class="ghost" data-act="kwsug" style="margin:0 0 10px">💡 הצעת מילות מפתח מההיסטוריה</button>
     <p class="note">כשהתיאור בהודעה מכיל מילה מהרשימה, הסעיף נבחר לבד. אם כמה מילים מתאימות – המילה הארוכה (המדויקת) קובעת, למשל "סופר פארם" לפני "סופר". רווח לפני ואחרי (" חיה ") = רק מילה שלמה.</p>
     <div class="row2"><input class="inp" id="kw-w" placeholder="מילה"><button class="inp" id="kw-c" style="text-align:right">${cat ? esc(kwCatName(cat)) : 'סעיף…'}</button></div>
     <button class="primary" id="kw-add">הוספה</button>
@@ -1887,6 +1977,7 @@ const ACT = {
   fopen: () => { S.fOpen = !S.fOpen; render(); },
   fclear: () => { Object.assign(S.f, {g: '', pay: '', who: ''}); render(); },
   kw: () => kwSheet(),
+  kwsug: () => kwSuggestSheet(),
   guide: () => guideSheet(),
   sync: () => syncSheet(),
   xlimport: () => $('#f-xl').click(),
@@ -1964,7 +2055,7 @@ window.addEventListener('popstate', () => {
   setTimeout(() => { if (!guardActive) pushGuard(); }, 2200);
 });
 /* =============== installed app: share target + updates =============== */
-const APP_VERSION = '3.4';
+const APP_VERSION = '3.5';
 async function importPendingShare() {
   let c; try { c = await caches.open('shared'); } catch { return; }
   const fr = await c.match('./shared-file'), ir = await c.match('./shared-info');

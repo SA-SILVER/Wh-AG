@@ -376,6 +376,28 @@ def main():
         ev("ACT.fopen()")
         check('…and open on a tap', pg.locator('[data-fsel]').count() == 3)
         ev("ACT.fopen()")
+        print('keyword suggestions from the whole history')
+        hist = "\n".join(["15/0%d/2025, 10:00 - שי: %d מאפיית הכיכר" % (m, 30 + m) for m in range(1, 6)] +
+                         ["20/0%d/2025, 10:00 - שיראל אשתי: %d ירקן בשוק" % (m, 40 + m) for m in range(1, 5)] +
+                         ["21/0%d/2025, 10:00 - שי: %d צעצוע" % (m, 50 + m) for m in range(1, 3)] +
+                         ["25/11/2026, 09:00 - שי: 33 מאפיית הכיכר"])
+        ev("stack.slice().forEach(e => closeSheet(e))")
+        ev("async t => { await importFile(new File([t], 'h.txt')); }", hist); pg.wait_for_timeout(300)
+        check('after an import, the result offers keyword suggestions', pg.locator('.sheet [data-act=kwsug]').count() == 1)
+        ks = ev("() => kwSuggest(S.hist.items).map(x => [x.w, x.n])")
+        check('words repeated 3+ times with no keyword are suggested, rare ones are not', any(w == 'מאפיית' and n == 6 for w, n in ks) and any(w == 'ירקן' for w, n in ks) and not any(w == 'צעצוע' for w, n in ks), ks)
+        check('names and payment words are not suggested', not any(w in ('שי', 'שיראל', 'אשראי', 'כאל') for w, n in ks), ks)
+        check('the old history is not saved with the data', ev("!JSON.stringify(D).includes('ירקן בשוק')"))
+        ev("() => { const id = D.chat.find(i => /33 מאפיית/.test(i.text)).id; D.ov[id] = {cat: 'c1'}; save(false); }")
+        check('the suggested section comes from lines already sorted in the app', ev("() => (kwSuggest(S.hist.items).find(x => x.w === 'מאפיית') || {}).cats[0] === 'c1'"))
+        ev("stack.slice().forEach(e => closeSheet(e)); kwSuggestSheet()"); pg.wait_for_timeout(250)
+        pg.fill('[data-kwv="מאפיית"]', 'מאפיי'); pg.click('[data-kp="מאפיית"][data-c="c1"]'); pg.wait_for_timeout(200)
+        check('approving adds the (edited) word to the keywords', ev("D.kw.some(([k, c]) => k === 'מאפיי' && c === 'c1')"))
+        check('…and the word leaves the list', not ev("kwSuggest(S.hist.items).some(x => x.w === 'מאפיית')"))
+        pg.click('[data-kn^="ירקן"]'); pg.wait_for_timeout(200)
+        check('"לא מילת מפתח" hides the word for good', not ev("kwSuggest(S.hist.items).some(x => x.w === 'ירקן')") and ev("(D.meta.kwNo || []).includes('ירקן')"))
+        check('a two-letter word is saved as a whole word', ev("kwForm('גן') === ' גן ' && kwForm('דלק') === 'דלק'"))
+        ev("stack.slice().forEach(e => closeSheet(e))")
         print('screens render without errors')
         for v in ['home', 'data', 'review']:
             ev(f"ACT.view({{dataset: {{v: '{v}'}}}})")

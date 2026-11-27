@@ -273,3 +273,5 @@ body:has(.ov.on) .toast.on{transform:translateX(-50%)}
 .sheet .gname:first-of-type{margin-top:2px}
 .actlist span.v.warn{color:#C2563F}
 .actlist + .gname{margin-top:18px}
+.kwalt{font-size:13px;color:var(--muted);margin:-2px 0 8px;display:flex;flex-wrap:wrap;align-items:center;gap:6px}
+.kwalt button{font-size:13px;padding:3px 10px;border-radius:999px;box-shadow:inset 0 0 0 1px #E6E2EC}
